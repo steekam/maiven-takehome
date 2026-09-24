@@ -50,13 +50,102 @@ Python Loguru ──> logs/ingest.jsonl       Pino ──> logs/web.jsonl
                          (append-only, gitignored)
 ```
 
-Keep the baseline Postgres schema small: `documents` with `document_number`, `title`, `publication_date`, `effective_on`, `abstract`, `agencies` JSON, `html_url`, and timestamps if useful. The reliability stretch adds small `ingest_runs` and `ingest_run_pages` tables for run state, source checkpoints, and archive-to-record traceability; it does not add a general job engine or normalized agency catalog.
+Keep the baseline Postgres schema small: `documents` with `document_number`, `title`, `publication_date`, `effective_on`, `abstract`, `agencies` JSON, `html_url`, and timestamps if useful. The reliability stretch adds `ingest_runs`, `ingest_run_pages`, and `ingest_run_documents` for run state, checkpoints, and archive-to-record traceability; it does not add a general job engine or normalized agency catalog.
 
-Append one record per received HTTP response to `data/raw/federalregister/run_id=<id>/responses.jsonl`. Each record should include `run_id`, a unique `request_id`, page and attempt numbers, fetch time, method and requested URL, HTTP status, selected response headers (including the upstream `x-request-id` when present), `content_sha256`, and the original response body as UTF-8 text. Decode as UTF-8 strictly and hash the response body bytes before JSON parsing; re-encoding the stored body as UTF-8 must reproduce the hash. Archive successful and unsuccessful HTTP responses before status classification or retry so a failed run can be inspected. A transport failure with no response belongs in diagnostics only. Keep this durable source archive separate from `logs/`.
+Append one record per received HTTP response to `data/raw/federalregister/run_id=<id>/responses.jsonl`. Each record should include `run_id`, a unique `request_id`, page and attempt numbers, fetch time, method and requested URL, HTTP status, selected response headers (including the upstream `x-request-id` when present), `content_sha256`, and the response body. Hash the exact response body bytes before decoding or JSON parsing. Store the body as UTF-8 text when strict decoding succeeds; otherwise store its exact bytes as base64 with an explicit `body_encoding`, so even malformed responses remain losslessly archived and the hash can be re-verified. Archive successful and unsuccessful HTTP responses before status classification or retry so a failed run can be inspected. A transport failure with no response belongs in diagnostics only. Keep this durable source archive separate from `logs/`.
+
+### Ingest model schemas and data flow
+
+Keep upstream DTOs, archived evidence, normalized rows, and run bookkeeping as distinct models. Validate only the source fields the workflow needs; the JSONL archive retains the full response body, including fields outside these models.
+
+```text
+DocumentSearch = {
+  agencies: string[], document_types: string[], order: "newest",
+  per_page: integer, publication_date?: { gte?: date, lte?: date }, fields?: string[]
+}
+
+FederalRegisterPage = {
+  count?: integer, total_pages?: integer, next_page_url?: URL | null,
+  results: FederalRegisterDocument[]
+}
+
+Agency = source agency object (preserved as JSON)
+
+FederalRegisterDocument = {
+  document_number: string, title: string, type: string,
+  publication_date: date, effective_on?: date | null,
+  abstract?: string | null, agencies: Agency[], html_url: URL
+}
+
+ArchivedResponse = {
+  run_id: UUID, request_id: UUID, page_number: integer, attempt: integer,
+  fetched_at: timestamp, request: { method: "GET", url: URL },
+  response: { status: integer, upstream_request_id?: string, headers: object },
+  content_sha256: string, body_encoding: "utf-8" | "base64", body: string
+}
+
+Document = {
+  document_number: string (PK), title: string, publication_date: date,
+  effective_on: date | null, abstract: string | null,
+  agencies: JSON, html_url: URL, updated_at: timestamp
+}
+```
+
+The reliability extension persists this small graph in Postgres:
+
+```text
+ingest_runs(
+  run_id UUID PK, status, query_fingerprint, next_page_url,
+  unique_target, pages_fetched, unique_documents_seen, inserted_count, updated_count,
+  retries, failure_class, started_at, finished_at
+)
+ingest_run_pages(
+  request_id UUID PK, run_id FK, page_number, fetched_at, http_status,
+  upstream_request_id NULL, archive_path, content_sha256,
+  UNIQUE(run_id, request_id)
+)
+ingest_run_documents(
+  run_id FK, request_id, document_number FK -> documents, outcome (inserted|updated),
+  PK(run_id, document_number), FK(run_id, request_id) -> ingest_run_pages
+)
+documents(document_number PK, normalized serving fields...)
+```
+
+```mermaid
+erDiagram
+    INGEST_RUNS ||--o{ INGEST_RUN_PAGES : contains
+    INGEST_RUN_PAGES ||--o{ INGEST_RUN_DOCUMENTS : persists
+    DOCUMENTS ||--o{ INGEST_RUN_DOCUMENTS : identifies
+    INGEST_RUNS {
+        uuid run_id PK
+        string status
+        string query_fingerprint
+        string next_page_url
+    }
+    INGEST_RUN_PAGES {
+        uuid request_id PK
+        uuid run_id FK
+        string archive_path
+        string content_sha256
+    }
+    INGEST_RUN_DOCUMENTS {
+        uuid run_id FK
+        uuid request_id FK
+        string document_number FK
+        string outcome
+    }
+    DOCUMENTS {
+        string document_number PK
+        date publication_date
+        string title
+    }
+```
+
+`ingest_run_pages` points to the successful archived response for a persisted page. `ingest_run_documents` records which normalized document came from that page and whether the upsert inserted or updated it. Its `(run_id, document_number)` key enforces one persisted link per unique document in a run; a repeated source ID in a later page stays in that raw response but is not upserted or counted again. Failed/retried HTTP attempts remain in the raw archive and diagnostic sink, correlated by `request_id`; they do not create persisted-document links. Build the run summary by reading all response attempts from the run's JSONL archive and joining successful request IDs to the Postgres page/document links.
 
 ### Resumable page transaction
 
-The reliability stretch stores a run's status (`running`, `failed`, or `succeeded`), immutable query fingerprint, target, counters, failure class, and `next_page_url` checkpoint in `ingest_runs`. The checkpoint is the URL to fetch next; initialize it with the first request URL. After a page is archived, validated, and normalized, use one Postgres transaction to upsert only the records within the remaining unique-document allowance by `document_number`, write its `ingest_run_pages` manifest (request ID, archive path/hash, page number, and persisted document IDs/outcomes), and update counters/checkpoint/status. For a nonterminal page, set the checkpoint to the API-provided `next_page_url`. If the source has no next link or the unique-document target is met, clear the checkpoint and mark the run `succeeded` in that same transaction. Preserve the full fetched response, including any unused records and returned next link, in the raw archive. Never derive a cursor from `count` or `total_pages`.
+The reliability stretch stores a run's status (`running`, `failed`, or `succeeded`), immutable query fingerprint, target, counters, failure class, and `next_page_url` checkpoint in `ingest_runs`. The checkpoint is the URL to fetch next; initialize it with the first request URL. After a page is archived, validated, and normalized, use one Postgres transaction to upsert only previously unseen `document_number`s within the remaining unique-document allowance, write its `ingest_run_pages` row and `ingest_run_documents` outcome rows, and update counters/checkpoint/status. The `(run_id, document_number)` key enforces run-wide deduplication. For a nonterminal page, set the checkpoint to the API-provided `next_page_url`. If the source has no next link or the unique-document target is met, clear the checkpoint and mark the run `succeeded` in that same transaction. Preserve the full fetched response, including duplicate/unused records and the returned next link, in the raw archive. Never derive a cursor from `count` or `total_pages`.
 
 Fetch one page at a time, following the API's cursor chain in order. If the process fails before the page transaction commits, the checkpoint still points to that page; resume refetches it, and the unique-key upsert prevents duplicates. If commit succeeds, page records, counts, manifest, and the next checkpoint or terminal status are durable together. A resume must match the original query fingerprint. Archive append is intentionally outside the DB transaction: an interrupted page may leave an extra archived attempt, but it cannot advance the checkpoint or skip persistence. Use a per-run Postgres advisory lock so a stale `running` run can resume after a process exits, while two workers cannot advance the same cursor chain concurrently.
 
@@ -65,11 +154,15 @@ sequenceDiagram
     participant FR as Federal Register
     participant CLI as Ingest CLI
     participant Archive as Raw JSONL archive
+    participant Model as Validate + normalize
     participant PG as Postgres
+    CLI->>PG: Create/resume run; acquire per-run lock
     CLI->>FR: GET checkpoint URL (sequential)
     FR-->>CLI: Response + next_page_url
     CLI->>Archive: Append body, request metadata, SHA-256
-    CLI->>PG: Transaction: upsert docs + manifest + checkpoint/status
+    CLI->>Model: Validate envelope; normalize remaining unique records
+    Model-->>CLI: Rows + API next_page_url
+    CLI->>PG: Transaction: upsert docs + page/document links + checkpoint/status
     alt Commit succeeds
         PG-->>CLI: Commit page and checkpoint/status together
         CLI->>FR: Fetch next URL if checkpoint is non-null
@@ -110,7 +203,7 @@ pipelines/ingest/
 compose.yaml              local PostgreSQL
 data/raw/                 run-scoped JSONL Federal Register response archive
 logs/                     local JSONL diagnostics; ignored by Git
-docs/                     plan, append-only devlog, README links
+docs/                     plan, append-only devlog, assignment brief, README links
 ```
 
 Keep the two toolchains independent. Run migrations from the web app before ingesting; the Python CLI uses the same Postgres columns through parameterized SQL. Skip Turborepo or a cross-language task runner unless setup proves it necessary.
@@ -152,7 +245,7 @@ The probe found a page-size inconsistency: `per_page=2` returned two rows, while
 | “A run should ingest 100 documents” | Treat 100 as a per-run target of unique documents, not a lifetime database cap. Stop earlier only when results are exhausted. | Put this in a README “Assumptions” section: “Each run fetches up to 100 distinct Federal Register documents. This is a per-run target, not a lifetime database cap or 100 new-to-database rows. Re-runs upsert matching documents, and existing rows are retained.” |
 | Source pagination | Request `per_page=100` by default (configurable within the documented 1–1000 range), follow `next_page_url` as returned, and count unique document numbers. Stop at 100 unique documents or when the next link is absent/null. | API response links carry an opaque `search_after_cursor`; do not synthesize cursor values. Ignore `count` and `total_pages`. The observed `per_page=1` anomaly is covered by a client fixture. |
 | Do we need an extra upstream page? | No. An absent/null `next_page_url` marks exhaustion; stop earlier at 100 unique documents. | The API provides the continuation link. Do not add a confirmation request or rely on totals. |
-| Raw source archive | Append every received HTTP response to `data/raw/federalregister/run_id=<id>/responses.jsonl` before status classification, retry, or normalization. Each line includes run/request IDs, page/attempt, fetch time, method/URL, status, selected response headers (including upstream request ID when present), response-body SHA-256, and the response body as UTF-8 text. | Preserves request/response evidence for replay and diagnosis if parsing, normalization, or the DB write fails. A Postgres page manifest links successful archived responses to persisted document IDs/outcomes. This is separate from gitignored diagnostic JSONL under `logs/`; no PyArrow dependency is needed. |
+| Raw source archive | Append every received HTTP response to `data/raw/federalregister/run_id=<id>/responses.jsonl` before status classification, retry, or normalization. Each line includes run/request IDs, page/attempt, fetch time, method/URL, status, selected response headers (including upstream request ID when present), response-body SHA-256, and losslessly encoded body bytes (UTF-8 text or base64). | Preserves request/response evidence for replay and diagnosis if parsing, normalization, or the DB write fails. Postgres page/record links associate successful archived responses with persisted document IDs/outcomes; the run summary reads every attempt from the archive. This is separate from gitignored diagnostic JSONL under `logs/`; no PyArrow dependency is needed. |
 | Runtime logs | Use Loguru in Python and Pino in the Next.js server for JSONL append sinks at `logs/ingest.jsonl` and `logs/web.jsonl`. Add `/logs/` to root `.gitignore`. | `pinio` interpreted as Pino. Keep human decisions in `docs/devlog.md`; logs hold machine events only. Do not log raw payloads. |
 | API format | Follow JSON:API 1.1 for the supported read-only documents collection: `application/vnd.api+json`, top-level `data`, resource objects (`type: documents`, `id: document_number`, `attributes`), top-level `links.self`/`links.next`, stable `meta`, and JSON:API `errors`. | Do not return a custom `{ items, nextCursor }` envelope. This is a scoped read API; writes, relationships, `include`, and compound documents are out of scope. Keep `agencies` as an attribute. |
 | Media negotiation | Return `Content-Type: application/vnd.api+json` and honor JSON:API's `Accept` media-type rules for the supported representation. | No extensions or profiles are needed. Keep negotiation small but spec-correct for the media types and parameters the endpoint supports. |
@@ -212,7 +305,7 @@ Total planned time: 170 minutes, leaving 10 minutes of the 3-hour ceiling for se
 The 170-minute plan is the assignment baseline. If a stretch slice fits, prioritize these first three in order; do them before a hosted demo or visual polish. The fourth item strengthens a required API contract. Treat the fifth as optional presentation work.
 
 1. **Resume and prove idempotency.** Add minimal `ingest_runs` state: status, query fingerprint, target, next-page URL checkpoint, counters, and failure class. Resume a failed/interrupted run by ID only when its query fingerprint matches. Advance the source-provided checkpoint in the same transaction as page upserts and the page manifest. Upsert on the Federal Register `document_number`. Keep a run single-worker and each cursor chain sequential. Prove restart after a committed page neither duplicates nor skips source records.
-2. **Link the raw archive to persisted records.** Keep one JSONL response record per HTTP attempt with run ID, request ID, page/attempt, requested URL, fetch time, status, optional upstream `x-request-id`, and SHA-256. `ingest_run_pages` links each successfully persisted page's request ID, archive path/hash, and document IDs/outcomes. A structured run summary event in `logs/ingest.jsonl` links every archived attempt by request ID and archive path/hash, and links successful pages to persisted records. Report pages fetched, records inserted/updated, retries, and failures without copying source bodies into diagnostics.
+2. **Link the raw archive to persisted records.** Keep one JSONL response record per HTTP attempt with run ID, request ID, page/attempt, requested URL, fetch time, status, optional upstream `x-request-id`, and SHA-256. `ingest_run_pages` links each successfully persisted page to its request ID and archive path/hash; `ingest_run_documents` links that page to document IDs and upsert outcomes. Build the structured `logs/ingest.jsonl` run summary by scanning every archived attempt and joining successful request IDs to persisted records. Report pages fetched, records inserted/updated, retries, and failures without copying source bodies into diagnostics.
 3. **Prove failure and recovery with recorded fixtures.** Cover opaque cursor progression, duplicate IDs across pages, restart/resume, timeout/429/5xx retry behavior, malformed JSON, and invalid/missing envelopes. Assert retries stay bounded and sequential, failed pages do not advance the checkpoint, and run summaries carry the error class and request/archive references.
 4. **Verify JSON:API pagination end to end.** Keep valid `links.self` and `links.next`, consistent success `meta`, and top-level JSON:API errors with no `data`. Exercise a client that follows the returned cursor links and assert adjacent pages contain no duplicate records. The endpoint's base pagination contract remains part of the baseline.
 5. **Make a live walkthrough only after reliability work.** Deploy the app with a seeded dataset and prepare a short demo that runs one ingest, follows the run summary to archived pages and persisted records, then shows those records in the UI. Skip this if deployment setup competes with goals 1–3.
@@ -224,10 +317,10 @@ The 170-minute plan is the assignment baseline. If a stretch slice fits, priorit
 - Use fixture pages to test `next_page_url` traversal, same-origin checking, unique `document_number` counting, the 100-document cap, and duplicate IDs across pages. Ignore `count`/`total_pages`.
 - Test the retry classifier separately: transport timeout/connection failure, 408, 429 with delta/date `Retry-After`, 5xx, permanent 4xx, malformed JSON, and missing/invalid page envelope. Retries stay bounded and serial.
 - Emit one structured run summary with `run_id`, pages fetched, unique documents seen, rows inserted/updated, retries, duration, final status, and failure class. In the reliability stretch, include page request IDs, archive paths/hashes, and document IDs/outcomes so the summary can be followed into raw JSONL and Postgres.
-- Parse each raw archive line as JSON, re-hash its decoded response body bytes, and compare the body and request metadata with the fixture. Confirm later runs use new run-scoped paths and leave earlier archives unchanged.
+- Parse each raw archive line as JSON, decode `body` according to `body_encoding`, re-hash the original response bytes, and compare body/request metadata with the fixture. Cover both valid UTF-8 and malformed-byte bodies; confirm later runs use new run-scoped paths and leave earlier archives unchanged.
 - In the resumability stretch, inject a failure after one page commit, restart the same run, and compare the final persisted `document_number` set with the fixture's expected set. Assert the committed page is not duplicated or skipped, its checkpoint advances atomically, and a query-fingerprint mismatch prevents resume.
 - Follow `links.next` in a JSON:API client fixture; check each page's stable `meta`, `links.self`, error-document structure, and cross-page duplicate absence.
-- Check the run summary's page manifest: each successful page points to its JSONL response record/hash and the `document_number` rows persisted from that response; transient/malformed attempts still point to their archived request IDs, paths, hashes, and failure classes.
+- Check the run summary's page manifest: each successful page points to its JSONL response record/hash and the linked `document_number` rows persisted from that response; transient/malformed attempts still point to their archived request IDs, paths, hashes, and failure classes.
 - Parse each diagnostic JSONL line as JSON. Confirm a second run/request appends lines, each event has a correlation ID, and source bodies stay in the raw archive rather than logs.
 - Test `clean_text` with whitespace and markup/entity examples that the implementation actually handles.
 - Test re-run behavior against Postgres: ingest the same fixture twice, assert one row per `document_number`, and assert a previously stored unrelated row remains.
@@ -258,7 +351,7 @@ After the reliability stretch, consider an archive schema/version marker and ret
 
 ## Reconnaissance notes
 
-- The candidate brief is in [`Maiven_Takehome_Assessment.pdf`](/Users/steekam/sandbox/maiven-takehome/Maiven_Takehome_Assessment.pdf).
+- The candidate brief is in [`Maiven_Takehome_Assessment.pdf`](Maiven_Takehome_Assessment.pdf).
 - The Federal Register docs confirm public endpoints require no API key: [API documentation](https://www.federalregister.gov/developers/documentation/api/v1).
 - The 2026-09-24 OpenAPI snapshot is stored at [`pipelines/ingest/spec/federal-register.openapi.json`](../pipelines/ingest/spec/federal-register.openapi.json). It lists 14 GET paths, parameter/component schemas, and no successful response models.
 - A live EPA Rules request confirmed the agency/type filters and result envelope. `next_page_url` preserves filters and contains `search_after_cursor`; `count`/`total_pages` disagreed with the requested page size. `per_page=1` returned 20 records, while `per_page=2` returned two.

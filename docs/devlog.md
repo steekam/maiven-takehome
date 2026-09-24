@@ -87,3 +87,15 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Commit page records, archive manifest, counters, checkpoint, and terminal run state together. The run summary links all archived attempts (including failed/retried responses) by request ID and path/hash; only successfully persisted pages have document outcome links. Upstream `x-request-id` is optional.
 - Clarified JSON:API error documents: top-level `jsonapi`, `meta.request_id`, and `errors` with `status`, `title`, `detail`, and `source.parameter`; no `data` member.
 - This is a planning refinement only; no implementation or tests run.
+
+## 2026-09-24 — Ingest model view and assessment brief
+
+- Moved the takehome assessment PDF into `docs/` so the source brief lives with the plan and is tracked.
+- Added conceptual source DTO, raw response archive, normalized document, run, page, and run-document schemas to the plan, with an entity diagram and page transaction flow. The design still separates full raw source bodies, gitignored diagnostics, and normalized Postgres records.
+- This is a design/documentation update only; no implementation or tests run.
+
+## 2026-09-24 — Archive encoding and run-wide deduplication
+
+- Refined the raw JSONL body representation to preserve every response byte: store valid UTF-8 bodies as text and fall back to base64 for invalid UTF-8, with an explicit encoding marker. Hash the original response bytes before parsing.
+- Made `ingest_run_documents` unique on `(run_id, document_number)` so the persistence manifest enforces the per-run unique-document cap. Build summaries from every raw archive attempt, then join successful request IDs through the page and document manifest.
+- No implementation or tests run.
