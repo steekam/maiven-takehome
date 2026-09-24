@@ -113,33 +113,18 @@ documents(document_number PK, normalized serving fields...)
 ```
 
 ```mermaid
-erDiagram
-    INGEST_RUNS ||--o{ INGEST_RUN_PAGES : contains
-    INGEST_RUN_PAGES ||--o{ INGEST_RUN_DOCUMENTS : persists
-    DOCUMENTS ||--o{ INGEST_RUN_DOCUMENTS : identifies
-    INGEST_RUNS {
-        uuid run_id PK
-        string status
-        string query_fingerprint
-        string next_page_url
-    }
-    INGEST_RUN_PAGES {
-        uuid request_id PK
-        uuid run_id FK
-        string archive_path
-        string content_sha256
-    }
-    INGEST_RUN_DOCUMENTS {
-        uuid run_id FK
-        uuid request_id FK
-        string document_number FK
-        string outcome
-    }
-    DOCUMENTS {
-        string document_number PK
-        date publication_date
-        string title
-    }
+flowchart LR
+    RUN["ingest_runs<br/>PK run_id<br/>status · query_fingerprint<br/>unique_target · next_page_url<br/>run counters · timestamps"]
+    PAGE["ingest_run_pages<br/>PK request_id<br/>FK run_id<br/>archive_path · content_sha256<br/>HTTP attempt metadata"]
+    LINK["ingest_run_documents<br/>PK (run_id, document_number)<br/>FK (run_id, request_id)<br/>FK document_number<br/>outcome: inserted | updated"]
+    DOC["documents<br/>PK document_number<br/>title · publication_date<br/>effective_on · abstract<br/>agencies JSONB · html_url"]
+
+    RUN -->|"1 run : many pages"| PAGE
+    PAGE -->|"1 page : many records"| LINK
+    DOC -->|"1 document : many run links"| LINK
+
+    classDef table fill:#10243b,color:#f8fafc,stroke:#60a5fa,stroke-width:2px;
+    class RUN,PAGE,LINK,DOC table
 ```
 
 Think of the raw JSONL archive as the attempt record: it says what the script requested and exactly what the server returned, for every try. Postgres is the commit record: it says which response page made it through validation and its database transaction, and which distinct documents that run counted. The run summary reconciles the two using `(run_id, request_id)`. That gives one readable account of committed work and archived attempts that did not commit.

@@ -120,3 +120,8 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Made the per-run unique-document target configurable as `--max-unique-documents`, default 100, with positive-integer validation. Persist its value in `ingest_runs.unique_target` and include it in the resume fingerprint; fixtures can use a small limit such as 3. Keep source `per_page=100` independent.
 - Reframed the explanation: the raw JSONL archive is the attempt record; Postgres page/document manifests are the commit record; the run summary reconciles both by `(run_id, request_id)`. Every attempt remains visible, committed attempts link to counted document IDs/outcomes, and archived-only attempts point to diagnostics for the reason they did not commit.
 - Updated `docs/PLAN.md` with the configurable limit and a data-flow diagram. Design only; no implementation or tests run.
+
+## 2026-09-24 — Schema diagram contrast
+
+- Replaced the schema ER table rendering with a styled relationship flowchart: solid dark table nodes, light text, and blue borders avoid the renderer's pale-row/white-text contrast problem.
+- Updated `docs/PLAN.md`; documentation presentation only.
