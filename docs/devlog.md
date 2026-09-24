@@ -114,3 +114,9 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - A restart resumes the latest incomplete run by default when its query fingerprint matches, starting from its last committed `next_page_url`. `--new-run` deliberately starts a separate run. A completed run remains complete; the documents table is never truncated, so future runs can retain or update prior records.
 - Updated `docs/PLAN.md` to move run/checkpoint state into the baseline. This supersedes the immediately prior decision to fetch every page until source exhaustion without a run-wide target, while retaining the JSONB agency array and Drizzle Kit migration design.
 - Design only; no implementation or tests run.
+
+## 2026-09-24 — Configurable run target and run-summary explanation
+
+- Made the per-run unique-document target configurable as `--max-unique-documents`, default 100, with positive-integer validation. Persist its value in `ingest_runs.unique_target` and include it in the resume fingerprint; fixtures can use a small limit such as 3. Keep source `per_page=100` independent.
+- Reframed the explanation: the raw JSONL archive is the attempt record; Postgres page/document manifests are the commit record; the run summary reconciles both by `(run_id, request_id)`. Every attempt remains visible, committed attempts link to counted document IDs/outcomes, and archived-only attempts point to diagnostics for the reason they did not commit.
+- Updated `docs/PLAN.md` with the configurable limit and a data-flow diagram. Design only; no implementation or tests run.
