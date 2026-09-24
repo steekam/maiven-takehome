@@ -1,6 +1,6 @@
 # Maiven takehome plan
 
-- **Status:** planning and reconnaissance; OpenAPI snapshot and request probe captured, implementation not started
+- **Status:** database foundation implemented; ingest and app implementation not started
 - **Updated:** 2026-09-24
 - **Time box:** 2–3 hours, matching the candidate brief
 
@@ -261,7 +261,7 @@ The probe found a page-size inconsistency: `per_page=2` returned two rows, while
 | Database access and migrations | Python uses `psycopg` 3 with parameterized SQL, no Python ORM. TypeScript uses Drizzle ORM/Kit for the typed schema, generated SQL migrations, and serving queries. | `apps/web/src/db/schema.ts` is the schema source; Drizzle Kit generates committed SQL under `apps/web/drizzle/`, then applies it with `drizzle-kit migrate` before Python ingest. SQLAlchemy Core is the Python query-builder analogue to Kysely; direct Psycopg SQL is leaner for this fixed ingest. See [Drizzle Kit generate](https://orm.drizzle.team/docs/drizzle-kit-generate), [Drizzle Kit migrate](https://orm.drizzle.team/docs/drizzle-kit-migrate), [SQLAlchemy Core](https://docs.sqlalchemy.org/en/20/core/), and [Psycopg parameters](https://www.psycopg.org/psycopg3/docs/basic/params.html). |
 | Client behavior | Start with sequential page requests, configurable timeout and retry budget, and bounded retries for timeouts, 408, 429, and 5xx. Respect `Retry-After`; fail fast on other 4xx and invalid payload envelopes. | The API publishes no quota in its schema/guide. One in-flight request is enough for this run. Log status, latency, upstream `x-request-id` when present, retries, and terminal error class. |
 | UI | Single responsive list page; search, two date inputs, result count for the current page, and Load more. Use shadcn Button/Input if setup stays quick; native date inputs are fine. | Meets the assignment without spending time on a component library showcase. |
-| Local database | Start with PostgreSQL from Docker Compose and one documented setup command. | Docker and `psql` are available. Keep hosting out of the critical path. See optional preview note below. |
+| Local database | Use the machine's local PostgreSQL for development; retain Compose as an optional reviewer shortcut. | Create `maiven-takehome` in local PostgreSQL, set Varlock's `DATABASE_URL`, and run `pnpm db:migrate`. Compose defaults to host port 5433. Keep hosting out of the critical path. See [database setup](database.md). |
 
 ### JSON:API collection shape
 

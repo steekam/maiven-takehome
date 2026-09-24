@@ -1,1 +1,41 @@
 /logs/
+/.env.local
+/.env.*.local
+/node_modules/
+**/node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# TypeScript / Next.js
+.next/
+out/
+.turbo/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDEs and editors
+.idea/
+.vscode/
+.fleet/
+*.sublime-workspace
+*.swp
+*.swo

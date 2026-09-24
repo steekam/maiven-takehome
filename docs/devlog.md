@@ -125,3 +125,15 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 
 - Replaced the schema ER table rendering with a styled relationship flowchart: solid dark table nodes, light text, and blue borders avoid the renderer's pale-row/white-text contrast problem.
 - Updated `docs/PLAN.md`; documentation presentation only.
+## 2026-09-24 — Local PostgreSQL and Drizzle baseline
+
+- Added the shared Drizzle schema and generated SQL migration for `documents`, `ingest_runs`, `ingest_run_pages`, and `ingest_run_documents`, including run-wide idempotency keys, page-manifest traceability, data checks, and the API publication cursor index.
+- Added the pnpm workspace, Varlock `.env.schema` for validated `DATABASE_URL`, and ignored machine-specific `.env.local`; the example config targets database `maiven-takehome`.
+- Local development uses the machine's PostgreSQL service. `docker-compose.yaml` remains an optional quick PostgreSQL service for reviewers; no container runtime was started.
+- **Verification:** generated the migration with Drizzle Kit, applied it to the existing local PostgreSQL 17.7 `maiven-takehome` database, confirmed all four tables and expected indexes plus one migration record, type-checked the schema/config, and validated Varlock config. This implementation stage does not include ingest or app code.
+
+## 2026-09-24 — Local database onboarding details
+
+- Clarified fresh local setup: create `maiven-takehome` with the local PostgreSQL role, copy `.env.local.example`, and set the role-specific Varlock URL before running migrations.
+- Changed the optional Compose host binding to configurable `POSTGRES_PORT`, default 5433, so it can coexist with local PostgreSQL on 5432.
+- Independent review found no schema or migration blockers; these documentation and port changes address its onboarding findings.
