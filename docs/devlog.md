@@ -29,3 +29,9 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 
 - Added the brief's GitHub/zip submission choices and technical-discussion preparation to the plan's final checklist.
 - **Verification:** checked these against the submission section of the supplied brief. No delivery action taken.
+
+## 2026-09-24 — API format and Python SQL tooling
+
+- Clarified that `{ items, nextCursor }` is a custom response, not JSON:API. JSON:API has its own top-level document members and `links.next`; it can still use cursor pagination.
+- Recorded SQLAlchemy Core as the Python query-builder analogue to Kysely. Kept direct parameterized Psycopg SQL as the plan for the small ingest so the SQL stays explicit and the ORM remains out of the Python path.
+- **References:** [JSON:API 1.1](https://jsonapi.org/format/#fetching-pagination), [SQLAlchemy Core](https://docs.sqlalchemy.org/en/20/core/), [Psycopg parameter binding](https://www.psycopg.org/psycopg3/docs/basic/params.html).
