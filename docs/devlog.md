@@ -73,3 +73,17 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Superseded the earlier Parquet/PyArrow archive proposal. Keep each received Federal Register HTTP response in run-scoped `data/raw/federalregister/run_id=<id>/responses.jsonl`, with run/request IDs, page and attempt numbers, fetch time, request method/URL, status, selected response headers, UTF-8 response body, and a SHA-256 hash of the exact pre-parse body bytes. Verify the hash by re-encoding the stored body as UTF-8.
 - Keep this source archive separate from the gitignored `logs/` JSONL diagnostic sinks. Diagnostic events carry correlation IDs and operational details but no source body. Normalized application records remain in Postgres. Do not add PyArrow solely for archiving.
 - This is a design decision only; no implementation or tests run.
+
+## 2026-09-24 — Reliability-first stretch priorities
+
+- Prioritized the stretch path as: (1) resume/idempotency with durable run status and the API-provided next-page URL checkpoint, transactionally advancing it with document upserts; (2) JSONL response/page traceability with a manifest linking archive records to persisted document IDs and outcomes; (3) fixture-driven restart, cursor, retry, and malformed-response verification.
+- Keep cursor chains sequential and allow only one active worker per run. A resume must match the original query fingerprint. A failed page leaves the checkpoint in place; replay may append another response record but unique `document_number` upserts prevent duplicates. The structured run summary should expose page/archive references, persisted IDs/outcomes, pages fetched, inserted/updated counts, retries, and failures.
+- Keep JSON:API `self`/`next`, stable success `meta`, and error documents in the required path; test following cursors without duplicate records. Rank a hosted seeded walkthrough after goals 1–3 and UI polish.
+- This is a planning update only; no implementation or tests run.
+
+## 2026-09-24 — Recovery design edge cases
+
+- Keep the 100-unique-document run cap independent of the configured source page size: archive the full response, persist only through the remaining unique allowance, and atomically mark the run succeeded/clear its next-page checkpoint when the cap or source end is reached.
+- Commit page records, archive manifest, counters, checkpoint, and terminal run state together. The run summary links all archived attempts (including failed/retried responses) by request ID and path/hash; only successfully persisted pages have document outcome links. Upstream `x-request-id` is optional.
+- Clarified JSON:API error documents: top-level `jsonapi`, `meta.request_id`, and `errors` with `status`, `title`, `detail`, and `source.parameter`; no `data` member.
+- This is a planning refinement only; no implementation or tests run.
