@@ -42,3 +42,18 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Replaced the custom envelope with `data` resources, `application/vnd.api+json`, standard `filter`/`page` parameter families, stable `sort`, self/next pagination links, and JSON:API errors.
 - Kept writes, relationships, and `include` out of scope; none support the requested list page. Increased the serving-stage estimate by five minutes.
 - **Verification:** compared the response and pagination shape with the JSON:API 1.1 spec. No app code or tests run.
+
+## 2026-09-24 — Parquet archive and diagnostic sinks
+
+- Chose immutable per-page Parquet snapshots under `data/raw/federalregister/run_id=<id>/`; retain the raw document object in `payload_json` and keep normalized serving records in Postgres.
+- Added root `.gitignore` rule `/logs/`. Planned append-only `logs/ingest.jsonl` via Python Loguru and `logs/web.jsonl` via Pino. Interpreted “pinio” as Pino.
+- Kept `docs/devlog.md` for human decisions and milestones; JSONL is machine-readable runtime feedback. Agent failure handoffs should name the run/request ID, log path, error class, and matching Parquet page.
+- **References:** [Loguru JSON serialization/file sink](https://loguru.readthedocs.io/en/stable/api/logger.html), [Pino file transport](https://github.com/pinojs/pino/blob/main/docs/transports.md).
+- **Verification:** checked official docs for JSON serialization and append defaults; reviewed `.gitignore`. No runtime data or tests run.
+
+## 2026-09-24 — Confirm JSON:API scope
+
+- Committed to JSON:API 1.1 response shapes for the supported read-only documents collection. The API returns `data` resources and top-level `links`; it will not use a custom `{ items, nextCursor }` envelope.
+- Clarified that JSON:API provides the pagination-link and `page` parameter conventions; cursor encoding and filter semantics remain API-specific. The resource `id` carries `document_number`, so the same field need not be duplicated in attributes.
+- Clarified the Python query-builder choice: SQLAlchemy Core is the closest Kysely analogue; direct Psycopg SQL remains simpler for this fixed ingest. Psycopg is the database driver.
+- **Verification:** reviewed the planned response example and scope against [JSON:API 1.1](https://jsonapi.org/format/). No app code or tests run.
