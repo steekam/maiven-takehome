@@ -57,3 +57,13 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Clarified that JSON:API provides the pagination-link and `page` parameter conventions; cursor encoding and filter semantics remain API-specific. The resource `id` carries `document_number`, so the same field need not be duplicated in attributes.
 - Clarified the Python query-builder choice: SQLAlchemy Core is the closest Kysely analogue; direct Psycopg SQL remains simpler for this fixed ingest. Psycopg is the database driver.
 - **Verification:** reviewed the planned response example and scope against [JSON:API 1.1](https://jsonapi.org/format/). No app code or tests run.
+
+## 2026-09-24 — Federal Register schema and ingest design
+
+- Pulled the public OpenAPI 3.0.0 document into `pipelines/ingest/spec/federal-register.openapi.json`. It lists 14 GET routes across published documents, public inspection, agencies, images, and suggested searches. It describes query/component enums, but each success response only says “200 Success”; there are no response models or auth scheme.
+- Confirmed the EPA Rules query parameters live: `conditions[agencies][]=environmental-protection-agency`, `conditions[type][]=RULE`, `order=newest`, and `per_page`. The optional repeated `fields[]` parameter can request fields such as `effective_on`.
+- A small live page returned `description`, `count`, `total_pages`, `next_page_url`, and `results`; result documents contain agency objects and nullable `abstract`/`excerpts`. The next URL preserves filters and supplies an opaque `search_after_cursor`. Ignore the reported totals and follow that URL.
+- Observed a `per_page` edge: a request for 2 returned 2 rows; a request for 1 returned 20, despite the schema's minimum of 1. A configured 100-row default matches the run target and documented 1,000 maximum; keep the anomaly in a fixture. Responses included `x-request-id`; sampled headers had no rate-limit fields. No quota is published in the developer guide.
+- Planned the ingest boundary: a reusable synchronous HTTPX client for the `/documents.json` search contract; an EPA Rules query preset for agency/type/date/order/fields; a workflow for page traversal, run cap, deduplication, Parquet archive, normalization, and DB upsert. Keep request transport sequential and retry/timeouts configurable.
+- The official REST API guide also limits pagination to the first 2,000 search results; use a date filter if a future ingest needs a wider source window. Current target is the newest 100 unique documents.
+- **Verification:** `jq` parsed the downloaded schema; two small EPA Rules probes confirmed filter encoding, `fields[]`, result envelope, `next_page_url`, and the `per_page=1` anomaly. No code or tests run.

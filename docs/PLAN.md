@@ -1,8 +1,8 @@
 # Maiven takehome plan
 
-**Status:** planning and reconnaissance  
-**Updated:** 2026-09-24  
-**Time box:** 2–3 hours, matching the candidate brief
+- **Status:** planning and reconnaissance; OpenAPI snapshot and request probe captured, implementation not started
+- **Updated:** 2026-09-24
+- **Time box:** 2–3 hours, matching the candidate brief
 
 ## Goal
 
@@ -59,7 +59,28 @@ Write structured events to `logs/ingest.jsonl` and `logs/web.jsonl`. Each line g
 
 ```text
 apps/web/                 Next.js App Router: API, page, Drizzle schema/migrations
-pipelines/ingest/         uv project: client, normalization, CLI, PyArrow archive, tests
+pipelines/ingest/
+  pyproject.toml           uv project; independent Python environment
+  uv.lock
+  spec/
+    federal-register.openapi.json
+  src/maiven_ingest/
+    cli.py                 parse run options; set exit status
+    config.py              environment config and validation
+    federal_register/
+      client.py            HTTP transport, query encoding, retry, page envelope
+      models.py            typed search options and minimal response envelope
+    sources/
+      epa_rules.py         EPA + Rule query preset
+    workflow.py            unique-document cap and ingest orchestration
+    archive.py             atomic Parquet page snapshots
+    normalize.py           raw document to serving row
+    store.py               parameterized Postgres upsert
+  tests/
+    fixtures/
+    test_client.py
+    test_normalize.py
+    test_workflow.py
 compose.yaml              local PostgreSQL
 data/raw/                 immutable Parquet source archive
 logs/                     local JSONL diagnostics; ignored by Git
@@ -68,13 +89,43 @@ docs/                     plan, append-only devlog, README links
 
 Keep the two toolchains independent. Run migrations from the web app before ingesting; the Python CLI uses the same Postgres columns through parameterized SQL. Skip Turborepo or a cross-language task runner unless setup proves it necessary.
 
+Keep the HTTP client generic for the Federal Register document-search endpoint, with a small EPA Rules query preset above it. The client owns URL/parameter construction, the reusable HTTP session, timeout/retry policy, status classification, response-envelope validation, and following a same-origin `next_page_url`. The EPA preset owns agency/type/date/order/field filters. The workflow owns the 100-unique-document cap, deduplication, archive-before-transform order, and persistence. Do not generate a broad SDK for all API paths: the OpenAPI spec leaves success response bodies undefined.
+
+Use a synchronous `httpx.Client` for the first version and keep page requests sequential. Its client-level configuration supports a reusable base URL, headers, connection pooling, and timeouts; retry behavior for `429`/`5xx` and `Retry-After` remains our explicit client policy. [HTTPX clients](https://www.python-httpx.org/advanced/clients/) and [timeouts](https://www.python-httpx.org/advanced/timeouts/) document those controls. The public API has no key requirement; the OpenAPI file lists no authentication scheme.
+
+### Federal Register API overview
+
+The checked-in [OpenAPI snapshot](../pipelines/ingest/spec/federal-register.openapi.json) is OpenAPI 3.0.0, served relative to `/api/v1/`. Its paths are all `GET` operations:
+
+| Area | Paths |
+| --- | --- |
+| Published documents | `/documents.{format}`, `/documents/{document_number}.{format}`, `/documents/{document_numbers}.{format}`, `/documents/facets/{facet}`, `/issues/{publication_date}.{format}` |
+| Public inspection documents | `/public-inspection-documents.{format}`, `/public-inspection-documents/current.{format}`, `/public-inspection-documents/{document_number}.{format}`, `/public-inspection-documents/{document_numbers}.{format}` |
+| Reference data | `/agencies`, `/agencies/{slug}`, `/images/{identifier}`, `/suggested_searches`, `/suggested_searches/{slug}` |
+
+The useful shared schemas describe inputs/enums, not document response models: `Format`, `DocumentField`, `DocumentType`, `Agency`, `FrDate`, `FrYear`, `Facet`, `Section`, `Topic`, `President`, `PresidentialDocumentType`, `PublicInspectionDocumentField`, and `SuggestedSearch`. The EPA slug is `environmental-protection-agency`; the document type value is `RULE`. The schema includes date ranges, full-text search, agency/type lists, `per_page` (documented 1–1000, default 20), `page`, `order`, and optional `fields[]`. It also describes effective-date, docket, RIN, section/topic, CFR, significance, and location filters. Every successful operation declares only “200 Success”, with no response schema.
+
+The in-scope search request is `GET /api/v1/documents.json` with `conditions[agencies][]=environmental-protection-agency`, `conditions[type][]=RULE`, `order=newest`, and `per_page` configured independently from the ingest run cap. Optional publication-date bounds and repeated `fields[]` values map directly to the documented parameters. `fields[]` can include `effective_on`; the default response sample did not include it. If the EPA profile sends `fields[]`, list every field needed by the serving row and archive each returned object unchanged before normalization.
+
+Keep three config boundaries separate:
+
+| Config | Options |
+| --- | --- |
+| `FederalRegisterClientConfig` | Base URL, connect/read timeout, default headers/User-Agent, retry budget, backoff bounds. No API-key option. |
+| `DocumentSearch` | Agency slugs, document types, optional term/date bounds, order, `per_page` (1–1000 per schema), optional field projection. Serialize arrays as repeated bracketed keys. |
+| `IngestRunConfig` | `max_unique_documents=100`; one in-flight request. This cap is independent of API page size and not sent as an API parameter. |
+
+The live response envelope observed for this query is `{ description, count, total_pages, next_page_url, results }`. Each result has a `document_number`, title/type, publication date, links, agencies as objects, and optional nullable `abstract`/`excerpts`. `next_page_url` is an API-provided URL with the query retained and an opaque `search_after_cursor`; use it verbatim after checking the origin. Do not construct the cursor or decide completion from `count`/`total_pages`.
+
+The probe found a page-size inconsistency: `per_page=2` returned two rows, while `per_page=1` returned twenty rows despite the schema's minimum of one. The EPA Rules profile should default to 100 rows per upstream request (the run still persists at most 100 unique documents), and tests should keep a fixture for the `per_page=1` anomaly. Two sampled responses had no rate-limit headers; one returned `x-request-id`. The API guide does not publish a request quota, so keep one in-flight request and treat `429`/`Retry-After` handling as polite client behavior, not a published service requirement.
+
 ## Decisions and assumptions
 
 | Topic | Plan | Reason / follow-up |
 | --- | --- | --- |
 | “A run should ingest 100 documents” | Treat 100 as a per-run target of unique documents, not a lifetime database cap. Stop earlier only when results are exhausted. | Put this in a README “Assumptions” section: “Each run fetches up to 100 distinct Federal Register documents. This is a per-run target, not a lifetime database cap or 100 new-to-database rows. Re-runs upsert matching documents, and existing rows are retained.” |
-| Source pagination | Request 20 at a time, follow a server-provided next-page URL if present; otherwise increment `page`. Count unique document numbers. Stop at 100; below 100, continue until an empty result. | Does not need a total count. If response shape differs, settle it in the API probe before implementation. |
-| Do we need an extra upstream page? | Only if fewer than 100 have been collected and the response does not provide a next-page link. An empty result confirms the end. Once 100 unique records are collected, stop. | Avoid trusting totals. No sixth request is needed just to prove the 100-document target was met. |
+| Source pagination | Request `per_page=100` by default (configurable within the documented 1–1000 range), follow `next_page_url` as returned, and count unique document numbers. Stop at 100 unique documents or when the next link is absent/null. | API response links carry an opaque `search_after_cursor`; do not synthesize cursor values. Ignore `count` and `total_pages`. The observed `per_page=1` anomaly is covered by a client fixture. |
+| Do we need an extra upstream page? | No. An absent/null `next_page_url` marks exhaustion; stop earlier at 100 unique documents. | The API provides the continuation link. Do not add a confirmation request or rely on totals. |
 | Raw source archive | Before normalization, write every successful result page to a unique Parquet path under `data/raw/federalregister/run_id=<id>/`. Store the original result object as `payload_json` plus page/run metadata. | Preserves inputs for replay and agent diagnosis if normalization or the DB write fails. Use an atomic temp-file rename; never replace an existing run/page file. |
 | Runtime logs | Use Loguru in Python and Pino in the Next.js server for JSONL append sinks at `logs/ingest.jsonl` and `logs/web.jsonl`. Add `/logs/` to root `.gitignore`. | `pinio` interpreted as Pino. Keep human decisions in `docs/devlog.md`; logs hold machine events only. Do not log raw payloads. |
 | API format | Follow JSON:API 1.1 for the supported read-only documents collection: `application/vnd.api+json`, top-level `data`, resource objects (`type: documents`, `id: document_number`, `attributes`), top-level `links.self`/`links.next`, and JSON:API `errors`. | Do not return a custom `{ items, nextCursor }` envelope. This is a scoped read API; writes, relationships, `include`, and compound documents are out of scope. Keep `agencies` as an attribute. |
@@ -85,7 +136,7 @@ Keep the two toolchains independent. Run migrations from the web app before inge
 | Text cleaning and search | Trim and collapse whitespace in title/abstract; preserve agency objects as JSON. Search title and abstract with case-insensitive `ILIKE`. | Simple, visible normalization and search; enough for roughly 100 rows. |
 | Date filter | Inclusive `filter[publication_date][gte]` and `filter[publication_date][lte]` on `publication_date`; reject invalid dates or lower bound after upper bound with 400. | JSON:API query family; no timezone conversion for date-only fields. |
 | Database access | Python uses `psycopg` 3 with parameterized SQL, no Python ORM. TypeScript uses Drizzle for schema/migrations and typed queries. | SQLAlchemy Core is the closest Python analogue to Kysely when a composable expression/query builder is wanted; direct Psycopg SQL is leaner for this small fixed ingest. Psycopg is the driver, not a query builder. See [SQLAlchemy Core](https://docs.sqlalchemy.org/en/20/core/) and [Psycopg parameters](https://www.psycopg.org/psycopg3/docs/basic/params.html). |
-| Client behavior | Start with sequential page requests, bounded timeout, and at most three retries for timeouts, 408, 429, and 5xx. Respect `Retry-After`; fail fast on other 4xx and invalid payloads. | A 100-document run needs about five page requests. Concurrency adds little and risks needless source load. Record status, latency, retries, and terminal error class. |
+| Client behavior | Start with sequential page requests, configurable timeout and retry budget, and bounded retries for timeouts, 408, 429, and 5xx. Respect `Retry-After`; fail fast on other 4xx and invalid payload envelopes. | The API publishes no quota in its schema/guide. One in-flight request is enough for this run. Log status, latency, upstream `x-request-id` when present, retries, and terminal error class. |
 | UI | Single responsive list page; search, two date inputs, result count for the current page, and Load more. Use shadcn Button/Input if setup stays quick; native date inputs are fine. | Meets the assignment without spending time on a component library showcase. |
 | Local database | Start with PostgreSQL from Docker Compose and one documented setup command. | Docker and `psql` are available. Keep hosting out of the critical path. See optional preview note below. |
 
@@ -121,18 +172,20 @@ Respond with `Content-Type: application/vnd.api+json` and handle `Accept` negoti
 
 | Stage | Time | Work | Exit check |
 | --- | ---: | --- | --- |
-| 0. Recon and scaffold | 10 min | Repo currently has the brief and planning docs only. Node 24.21, `uv` 0.10.6, Docker 29.4, and `psql` 17.7 are available. Probe one Federal Register response for field shape, ordering, next-page behavior, response headers, and practical request size. If this shell still cannot resolve the API, use a recorded fixture for local work and retry the probe from a network-enabled environment. | API assumptions are recorded; app and database start locally. |
-| 1. Tracer bullet | 40 min | Get one representative document through raw Parquet → normalize → Postgres → JSON:API → rendered list row. Add one migration and one seed/ingest path. | One source record is archived and visible from the app against local Postgres. |
-| 2. Complete ingest path | 35 min | Add 100-unique-document paging, append-only page archives, upsert, bounded retry classification, and Loguru run events. | Two consecutive runs leave row count stable and create new Parquet pages; failures include a run ID and error class. |
-| 3. Serve contract | 40 min | Add the JSON:API collection/resource envelope, media type, inclusive date filters, case-insensitive search, stable cursor ordering, pagination links, JSON:API errors, and Pino request events. | API returns valid JSON:API responses and appends correlated request events for unfiltered, filtered, invalid-date, and next-page requests. |
-| 4. Display | 15 min | Wire search, date inputs, result list, empty/loading/error states, and Load more. Reset accumulated rows/cursor when filters change. | A reviewer can search, filter, and fetch another page without refreshing. |
-| 5. Required checks and handoff | 30 min | Add the two focused tests, write README, run the full local path twice, review logs and git diff, note known limits. | Required tests pass; README setup works from a clean local database; no unrelated files are committed. |
+| 0. API contract | 10 min | Complete: save the OpenAPI snapshot, review endpoint/query schemas, and probe EPA Rules with a small page. Record that response bodies are undocumented, pagination uses `next_page_url`, and no quota headers were observed. | Request, response-envelope, and retry assumptions are recorded. |
+| 1. Ingest tracer bullet | 40 min | Scaffold the uv project and configure the HTTP client. Get one representative EPA Rule through typed query → source page → raw Parquet → normalization → Postgres upsert. | One source page is archived and one row is upserted in local Postgres. |
+| 2. Complete ingest path | 35 min | Add next-link iteration, the 100-unique-document cap, bounded retry classification, append-only page archives, and Loguru run events. | Two fixture runs leave row count stable and create new Parquet pages; failures include a run ID and error class. |
+| 3. Serve and display | 55 min | Add the JSON:API collection/resource envelope, media negotiation, inclusive date filters, case-insensitive search, stable cursor ordering, pagination links/errors, Pino events, and the list UI. | API and UI support search, filters, and Load more; request events are correlated. |
+| 4. Required checks and handoff | 30 min | Add focused tests, write README, run the full local path twice, review logs and git diff, and note known limits. | Required tests pass; README setup works from a clean local database; no unrelated files are committed. |
 
-Total planned time: 170 minutes, leaving 10 minutes of the 3-hour ceiling for setup friction. If time slips, keep the tracer bullet, idempotent ingest, JSON:API collection contract, required tests, and README. Defer visual polish and hosting first.
+Total planned time: 170 minutes, leaving 10 minutes of the 3-hour ceiling for setup friction. Work starts with the ingestion client and its source contract. If time slips, keep the ingest path, idempotent writes, JSON:API collection contract, required tests, and README. Defer visual polish and hosting first.
 
 ## Verification and observability
 
-- Probe the source with a single small request; inspect the actual `results` shape, agency shape, dates, ordering, pagination link/fields, status, and headers. Do not load-test a public API.
+- Keep one recorded, small EPA Rules probe for the actual `results` shape, agency shape, dates, ordering, pagination URL, status, and headers. Do not load-test a public API.
+- Test request serialization with repeated `conditions[agencies][]`, `conditions[type][]`, and optional `fields[]` keys. Check date bounds and `per_page` against the OpenAPI limits; keep the observed `per_page=1` response anomaly in the client fixture.
+- Use fixture pages to test `next_page_url` traversal, same-origin checking, unique `document_number` counting, the 100-document cap, and duplicate IDs across pages. Ignore `count`/`total_pages`.
+- Test the retry classifier separately: transport timeout/connection failure, 408, 429 with delta/date `Retry-After`, 5xx, permanent 4xx, malformed JSON, and missing/invalid page envelope. Retries stay bounded and serial.
 - Emit one structured run summary with `run_id`, pages fetched, unique documents seen, rows inserted/updated, retries, duration, final status, and failure class. Log each retry with status and delay. Avoid a durable run/job subsystem.
 - Read each written Parquet page back and compare `document_number` and `payload_json` with the fixture. Confirm a later run creates a new path and leaves earlier files unchanged.
 - Parse each JSONL line as JSON. Confirm a second run/request appends lines, each event has a correlation ID, and raw source fields stay in Parquet rather than logs.
@@ -167,5 +220,7 @@ Only after the required path works: add a Parquet schema/version marker and rete
 
 - The candidate brief is in [`Maiven_Takehome_Assessment.pdf`](/Users/steekam/sandbox/maiven-takehome/Maiven_Takehome_Assessment.pdf).
 - The Federal Register docs confirm public endpoints require no API key: [API documentation](https://www.federalregister.gov/developers/documentation/api/v1).
+- The 2026-09-24 OpenAPI snapshot is stored at [`pipelines/ingest/spec/federal-register.openapi.json`](../pipelines/ingest/spec/federal-register.openapi.json). It lists 14 GET paths, parameter/component schemas, and no successful response models.
+- A live EPA Rules request confirmed the agency/type filters and result envelope. `next_page_url` preserves filters and contains `search_after_cursor`; `count`/`total_pages` disagreed with the requested page size. `per_page=1` returned 20 records, while `per_page=2` returned two.
+- Two sample responses included an upstream `x-request-id` but no rate-limit headers. EPA-specific result fields and the `fields[]` projection are confirmed; server quota remains undocumented.
 - The [JSON:API 1.1 spec](https://jsonapi.org/format/) defines the media type, resource envelope, error member, pagination links, and `page` parameter family. Plan to follow those rules for the documents collection endpoint.
-- The first live `curl` attempt from this workspace failed at DNS resolution, so rate-limit headers and the response's next-page shape remain unverified here. Repeat stage 0 from a network-enabled shell before locking the client implementation.
