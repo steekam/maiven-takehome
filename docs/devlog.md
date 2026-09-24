@@ -35,3 +35,10 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Clarified that `{ items, nextCursor }` is a custom response, not JSON:API. JSON:API has its own top-level document members and `links.next`; it can still use cursor pagination.
 - Recorded SQLAlchemy Core as the Python query-builder analogue to Kysely. Kept direct parameterized Psycopg SQL as the plan for the small ingest so the SQL stays explicit and the ORM remains out of the Python path.
 - **References:** [JSON:API 1.1](https://jsonapi.org/format/#fetching-pagination), [SQLAlchemy Core](https://docs.sqlalchemy.org/en/20/core/), [Psycopg parameter binding](https://www.psycopg.org/psycopg3/docs/basic/params.html).
+
+## 2026-09-24 — JSON:API endpoint direction
+
+- User chose JSON:API compliance or a directionally compliant design. Scoped implementation to JSON:API 1.1 collection reads at `GET /api/documents`.
+- Replaced the custom envelope with `data` resources, `application/vnd.api+json`, standard `filter`/`page` parameter families, stable `sort`, self/next pagination links, and JSON:API errors.
+- Kept writes, relationships, and `include` out of scope; none support the requested list page. Increased the serving-stage estimate by five minutes.
+- **Verification:** compared the response and pagination shape with the JSON:API 1.1 spec. No app code or tests run.
