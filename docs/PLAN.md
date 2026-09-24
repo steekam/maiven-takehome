@@ -51,7 +51,7 @@ Python Loguru ──> logs/ingest.jsonl       Pino ──> logs/web.jsonl
                          (append-only, gitignored)
 ```
 
-Keep the baseline Postgres schema small: `documents` with `document_number`, `title`, `publication_date`, `effective_on`, `abstract`, `agencies jsonb`, `html_url`, and timestamps if useful. Store the upstream agencies as a JSONB array of agency objects; do not add a separate agency catalog for this takehome. Include `ingest_runs`, `ingest_run_pages`, and `ingest_run_documents` in the baseline to enforce the 100-unique-document run target, resume from a checkpoint, and trace archive pages to records. Do not add a general job engine.
+The `documents` table represents all 56 source document properties listed by the OpenAPI `DocumentField` enum, not only the fields selected by the assignment's sample query. Store scalar metadata as typed columns and arrays/variable nested objects as JSONB; retain `agencies` as an array of source agency objects without a separate agency catalog. Keep `updated_at` for local upsert tracking. Include `ingest_runs`, `ingest_run_pages`, and `ingest_run_documents` in the baseline to enforce the 100-unique-document run target, resume from a checkpoint, and trace archive pages to records. Do not add a general job engine.
 
 Append one record per received HTTP response to `data/raw/federalregister/run_id=<id>/responses.jsonl`. Each record should include `run_id`, a unique `request_id`, page and attempt numbers, fetch time, method and requested URL, HTTP status, selected response headers (including the upstream `x-request-id` when present), `content_sha256`, and the response body. Hash the exact response body bytes before decoding or JSON parsing. Store the body as UTF-8 text when strict decoding succeeds; otherwise store its exact bytes as base64 with an explicit `body_encoding`, so even malformed responses remain losslessly archived and the hash can be re-verified. Archive successful and unsuccessful HTTP responses before status classification or retry so a failed run can be inspected. A transport failure with no response belongs in diagnostics only. Keep this durable source archive separate from `logs/`.
 
@@ -73,9 +73,18 @@ FederalRegisterPage = {
 Agency = source agency object (retained in the raw response and the document's JSONB array)
 
 FederalRegisterDocument = {
-  document_number: string, title: string, type: string,
-  publication_date: date, effective_on?: date | null,
-  abstract?: string | null, agencies: Agency[], html_url: URL
+  abstract, action, agencies, agency_names, amendatory_instructions,
+  body_html_url, cfr_references, cfr_topics, citation, comment_url,
+  comments_close_on, correction_of, corrections, dates, disposition_notes,
+  docket_id, docket_ids, dockets, document_number, effective_on, end_page,
+  excerpts, executive_order_notes, executive_order_number, explanation,
+  full_text_xml_url, html_url, images, images_metadata, json_url, mods_url,
+  not_received_for_publication, page_length, page_views, pdf_url, president,
+  presidential_document_number, proclamation_number, public_inspection_pdf_url,
+  publication_date, raw_text_url, regulation_id_number_info,
+  regulation_id_numbers, regulations_dot_gov_info, regulations_dot_gov_url,
+  related_documents, significant, signing_date, start_page, subtype, title,
+  toc_doc, toc_subject, topics, type, volume
 }
 
 ArchivedResponse = {
@@ -85,11 +94,9 @@ ArchivedResponse = {
   content_sha256: string, body_encoding: "utf-8" | "base64", body: string
 }
 
-Document = {
-  document_number: string (PK), title: string, publication_date: date,
-  effective_on: date | null, abstract: string | null,
-  agencies: Agency[] (stored as jsonb), html_url: URL, updated_at: timestamp
-}
+Document = all FederalRegisterDocument properties persisted as database columns,
+           with source-optional properties nullable and nested values stored as jsonb;
+           plus updated_at: timestamp
 ```
 
 The ingest and resume flow persists this small graph in Postgres:
@@ -175,11 +182,15 @@ Write structured events to `logs/ingest.jsonl` and `logs/web.jsonl`. Each line g
 
 ```text
 apps/web/
-  src/db/schema.ts          Drizzle source schema, including documents.agencies jsonb
-  drizzle.config.ts         PostgreSQL schema and generated migration paths
-  drizzle/                  committed SQL migrations and Drizzle snapshots
-  package.json              drizzle-kit generate/migrate scripts
+  package.json              depends on @maiven/db and Drizzle ORM query operators
   src/                      Next.js App Router: API and page
+packages/db/
+  package.json              Drizzle ORM/Kit and PostgreSQL dependencies
+  src/client.ts             typed PostgreSQL client factory
+  src/schema.ts             shared schema for all source properties and run state
+  drizzle.config.ts         PostgreSQL schema and migration paths
+  drizzle/                  committed SQL migrations and Drizzle snapshots
+package.json                root DB scripts delegating into @maiven/db
 pipelines/ingest/
   pyproject.toml           uv project; independent Python environment
   uv.lock
@@ -202,7 +213,7 @@ pipelines/ingest/
     test_client.py
     test_normalize.py
     test_workflow.py
-compose.yaml              local PostgreSQL
+docker-compose.yaml       optional reviewer PostgreSQL service
 data/raw/                 run-scoped JSONL Federal Register response archive
 logs/                     local JSONL diagnostics; ignored by Git
 docs/                     plan, append-only devlog, assignment brief, README links
@@ -226,7 +237,7 @@ The checked-in [OpenAPI snapshot](../pipelines/ingest/spec/federal-register.open
 
 The useful shared schemas describe inputs/enums, not document response models: `Format`, `DocumentField`, `DocumentType`, `Agency`, `FrDate`, `FrYear`, `Facet`, `Section`, `Topic`, `President`, `PresidentialDocumentType`, `PublicInspectionDocumentField`, and `SuggestedSearch`. The EPA slug is `environmental-protection-agency`; the document type value is `RULE`. The schema includes date ranges, full-text search, agency/type lists, `per_page` (documented 1–1000, default 20), `page`, `order`, and optional `fields[]`. It also describes effective-date, docket, RIN, section/topic, CFR, significance, and location filters. Every successful operation declares only “200 Success”, with no response schema.
 
-The in-scope search request is `GET /api/v1/documents.json` with `conditions[agencies][]=environmental-protection-agency`, `conditions[type][]=RULE`, `order=newest`, and `per_page=100` by default. Optional publication-date bounds and repeated `fields[]` values map directly to the documented parameters. `fields[]` can include `effective_on`; the default response sample did not include it. If the EPA profile sends `fields[]`, list every field needed by the serving row and archive each returned object unchanged before normalization.
+The in-scope search request is `GET /api/v1/documents.json` with `conditions[agencies][]=environmental-protection-agency`, `conditions[type][]=RULE`, `order=newest`, and `per_page=100` by default. Optional publication-date bounds and repeated `fields[]` values map directly to the documented parameters. Request all 56 `DocumentField` enum values so normalized rows are not limited to the assignment sample projection; archive each returned object unchanged before normalization.
 
 Keep three config boundaries separate:
 
@@ -258,7 +269,7 @@ The probe found a page-size inconsistency: `per_page=2` returned two rows, while
 | Text cleaning and search | Trim and collapse whitespace in title/abstract; preserve agency objects in an `agencies jsonb` array. Search title and abstract with case-insensitive `ILIKE`. | Simple normalization and useful source agency data without a separate agency catalog. |
 | JSONB agency filtering | Store agencies as a JSONB array. If agency filters become necessary, use JSONB containment (`agencies @> '[{"slug":"…"}]'::jsonb`) and measure with `EXPLAIN (ANALYZE, BUFFERS)` before adding a GIN index. | A whole-column GIN `jsonb_path_ops` index supports `@>` and fits a dynamic agency filter better than a partial index. The current EPA-only dataset is small and every row is likely to match the EPA predicate, so defer indexing. A partial index is useful only for a selective, stable subset and a query whose predicate implies the index predicate; parameterized predicates do not match at planning time. See [PostgreSQL JSONB indexing](https://www.postgresql.org/docs/current/datatype-json.html#JSON-INDEXING) and [partial indexes](https://www.postgresql.org/docs/current/indexes-partial.html). |
 | Date filter | Inclusive `filter[publication_date][gte]` and `filter[publication_date][lte]` on `publication_date`; reject invalid dates or lower bound after upper bound with 400. | JSON:API query family; no timezone conversion for date-only fields. |
-| Database access and migrations | Python uses `psycopg` 3 with parameterized SQL, no Python ORM. TypeScript uses Drizzle ORM/Kit for the typed schema, generated SQL migrations, and serving queries. | `apps/web/src/db/schema.ts` is the schema source; Drizzle Kit generates committed SQL under `apps/web/drizzle/`, then applies it with `drizzle-kit migrate` before Python ingest. SQLAlchemy Core is the Python query-builder analogue to Kysely; direct Psycopg SQL is leaner for this fixed ingest. See [Drizzle Kit generate](https://orm.drizzle.team/docs/drizzle-kit-generate), [Drizzle Kit migrate](https://orm.drizzle.team/docs/drizzle-kit-migrate), [SQLAlchemy Core](https://docs.sqlalchemy.org/en/20/core/), and [Psycopg parameters](https://www.psycopg.org/psycopg3/docs/basic/params.html). |
+| Database access and migrations | Python uses `psycopg` 3 with parameterized SQL, no Python ORM. TypeScript uses Drizzle ORM/Kit for the typed schema, generated SQL migrations, and serving queries. | `packages/db/` owns the schema, typed PostgreSQL client factory, migration config/history, and dependencies; the web package consumes it and imports Drizzle query operators directly. Root pnpm scripts delegate to `@maiven/db` before Python ingest. The document table includes all 56 properties exposed in OpenAPI's `DocumentField` enum. SQLAlchemy Core is the Python query-builder analogue to Kysely; direct Psycopg SQL is leaner for this fixed ingest. See [Drizzle Kit generate](https://orm.drizzle.team/docs/drizzle-kit-generate), [Drizzle Kit migrate](https://orm.drizzle.team/docs/drizzle-kit-migrate), [SQLAlchemy Core](https://docs.sqlalchemy.org/en/20/core/), and [Psycopg parameters](https://www.psycopg.org/psycopg3/docs/basic/params.html). |
 | Client behavior | Start with sequential page requests, configurable timeout and retry budget, and bounded retries for timeouts, 408, 429, and 5xx. Respect `Retry-After`; fail fast on other 4xx and invalid payload envelopes. | The API publishes no quota in its schema/guide. One in-flight request is enough for this run. Log status, latency, upstream `x-request-id` when present, retries, and terminal error class. |
 | UI | Single responsive list page; search, two date inputs, result count for the current page, and Load more. Use shadcn Button/Input if setup stays quick; native date inputs are fine. | Meets the assignment without spending time on a component library showcase. |
 | Local database | Use the machine's local PostgreSQL for development; retain Compose as an optional reviewer shortcut. | Create `maiven-takehome` in local PostgreSQL, set Varlock's `DATABASE_URL`, and run `pnpm db:migrate`. Compose defaults to host port 5433. Keep hosting out of the critical path. See [database setup](database.md). |

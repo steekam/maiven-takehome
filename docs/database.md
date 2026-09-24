@@ -14,7 +14,7 @@ pnpm db:migrate
 
 If the database already exists, skip `createdb`. The example URL uses `your_local_role`; replace it with the PostgreSQL role that owns `maiven-takehome`, for example `postgresql://steekam@127.0.0.1:5432/maiven-takehome`. Varlock reads the committed `.env.schema` and ignored `.env.local`. `DATABASE_URL` is required and marked sensitive. Drizzle Kit commands run under `varlock run` so the validated value reaches the migration process.
 
-Generate a migration after changing `apps/web/src/db/schema.ts`:
+The database is a workspace package at `packages/db`: it owns the Drizzle schema, typed client factory, Drizzle Kit config, migrations, and database dependencies. The web app imports the client/schema from `@maiven/db` and uses Drizzle ORM's query operators. Root pnpm commands delegate to the DB package, where Varlock loads root `.env.schema` and `.env.local` and injects `DATABASE_URL`. Generate a migration after changing `packages/db/src/schema.ts`:
 
 ```sh
 pnpm db:generate

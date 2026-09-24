@@ -6,13 +6,22 @@ settings:
 
 importers:
 
-  .:
-    devDependencies:
-      varlock:
-        specifier: ^1.19.0
-        version: 1.20.0
+  .: {}
 
   apps/web:
+    dependencies:
+      '@maiven/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      drizzle-orm:
+        specifier: ^0.45.3
+        version: 0.45.3(@types/pg@8.23.1)(pg@8.23.0)
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/db:
     dependencies:
       drizzle-orm:
         specifier: ^0.45.3
@@ -30,6 +39,9 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      varlock:
+        specifier: ^1.19.0
+        version: 1.20.0
 
 packages:
 

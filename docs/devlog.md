@@ -137,3 +137,15 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Clarified fresh local setup: create `maiven-takehome` with the local PostgreSQL role, copy `.env.local.example`, and set the role-specific Varlock URL before running migrations.
 - Changed the optional Compose host binding to configurable `POSTGRES_PORT`, default 5433, so it can coexist with local PostgreSQL on 5432.
 - Independent review found no schema or migration blockers; these documentation and port changes address its onboarding findings.
+
+## 2026-09-24 — Database workspace package and full source document model
+
+- Moved the shared schema, Drizzle Kit config, scripts, dependencies, and migration history into `packages/db`; the web app now consumes `@maiven/db`, and root DB scripts delegate to that package.
+- Expanded `documents` to include all 56 Federal Register `DocumentField` properties. Confirmed the field set against the local OpenAPI enum and a live response requested with every field; all source selector fields map to columns, while nested/variable fields use JSONB.
+- Generated and applied an additive migration. **Verification:** Drizzle reports 57 document columns including local `updated_at`; database columns compare exactly to the 56 OpenAPI enum fields; migration history has two entries; TypeScript and Varlock checks pass.
+
+## 2026-09-24 — DB package client and upgrade safety
+
+- Exported a typed PostgreSQL client factory from `@maiven/db`; the web package keeps a direct Drizzle ORM dependency for query operators while PostgreSQL driver ownership stays with the DB package.
+- Made the required `type` column migration backfill existing EPA Rules rows as `RULE`, then remove the temporary default. The schema remains required with no permanent default.
+- Corrected the current repo-shape entry to `docker-compose.yaml`.

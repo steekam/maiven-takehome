@@ -8,6 +8,13 @@
       "when": 1790279532548,
       "tag": "0000_sad_deathbird",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790280412221,
+      "tag": "0001_chilly_steel_serpent",
+      "breakpoints": true
     }
   ]
 }

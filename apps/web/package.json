@@ -1,18 +1,11 @@
 {
   "name": "@maiven/web",
   "private": true,
-  "scripts": {
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
-  },
   "dependencies": {
-    "drizzle-orm": "^0.45.3",
-    "pg": "^8.16.3"
+    "@maiven/db": "workspace:*",
+    "drizzle-orm": "^0.45.3"
   },
   "devDependencies": {
-    "@types/pg": "^8.15.5",
-    "drizzle-kit": "^0.31.10",
     "typescript": "^5.9.3"
   }
 }

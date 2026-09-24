@@ -3,11 +3,8 @@
   "private": true,
   "packageManager": "pnpm@10.15.1",
   "scripts": {
-    "db:generate": "varlock run -- pnpm --filter @maiven/web db:generate",
-    "db:migrate": "varlock run -- pnpm --filter @maiven/web db:migrate",
-    "db:studio": "varlock run -- pnpm --filter @maiven/web db:studio"
-  },
-  "devDependencies": {
-    "varlock": "^1.19.0"
+    "db:generate": "pnpm --filter @maiven/db db:generate",
+    "db:migrate": "pnpm --filter @maiven/db db:migrate",
+    "db:studio": "pnpm --filter @maiven/db db:studio"
   }
 }
