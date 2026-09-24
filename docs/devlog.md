@@ -24,3 +24,8 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Confirmed Node `v24.21.0`, `uv 0.10.6`, Docker `29.4.0`, and `psql 17.7` are available.
 - Proposed `apps/web`, `pipelines/ingest`, and root `compose.yaml`; keep Next/Drizzle and Python/psycopg toolchains independent, with Drizzle migrations as the schema source.
 - **Verification:** version commands returned successfully. No services started and no tests run.
+
+## 2026-09-24 — Handoff requirements
+
+- Added the brief's GitHub/zip submission choices and technical-discussion preparation to the plan's final checklist.
+- **Verification:** checked these against the submission section of the supplied brief. No delivery action taken.

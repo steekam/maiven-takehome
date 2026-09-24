@@ -125,6 +125,12 @@ Check current limits before creating a hosted database: [Neon plans](https://neo
 
 Only after the required path works: retain raw source payloads with a schema/version marker, add an ingestion-run table and resumable checkpoint, use PostgreSQL full-text search, support document detail pages and richer agency filters, add accessibility/keyboard polish, deploy the web app and database, and monitor a scheduled refresh. These are discussion points, not the 2–3 hour target.
 
+## Submission checklist
+
+- [ ] README covers requirements, setup/run steps, and what more time would change.
+- [ ] Be ready to explain the identity/upsert rule, source pagination, retries, API cursor, and the main tradeoffs in a technical discussion. AI-assisted implementation is allowed by the brief.
+- [ ] Before delivery, choose the submission path in the brief: grant GitHub access to `joshjbayne@gmail.com`, or send a zip to `josh.bayne@maiven.tech`.
+
 ## Reconnaissance notes
 
 - The candidate brief is in [`Maiven_Takehome_Assessment.pdf`](/Users/steekam/sandbox/maiven-takehome/Maiven_Takehome_Assessment.pdf).
