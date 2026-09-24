@@ -18,3 +18,9 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Clarified that the assignment asks for pagination. A cursor/keyset is one retrieval strategy; JSON:API is an optional API response/query specification that can represent pagination links and cursor parameters.
 - Kept a small `{ items, nextCursor }` response contract in the plan because the brief does not require JSON:API's resource envelope.
 - **Reference:** [JSON:API 1.1 pagination](https://jsonapi.org/format/#fetching-pagination).
+
+## 2026-09-24 — Local tooling and repo shape
+
+- Confirmed Node `v24.21.0`, `uv 0.10.6`, Docker `29.4.0`, and `psql 17.7` are available.
+- Proposed `apps/web`, `pipelines/ingest`, and root `compose.yaml`; keep Next/Drizzle and Python/psycopg toolchains independent, with Drizzle migrations as the schema source.
+- **Verification:** version commands returned successfully. No services started and no tests run.

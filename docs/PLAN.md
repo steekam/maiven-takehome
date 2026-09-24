@@ -48,6 +48,17 @@ Python CLI ── clean + normalize ── psycopg parameterized SQL
 
 Keep the shared schema small: `documents` with `document_number`, `title`, `publication_date`, `effective_on`, `abstract`, `agencies` JSON, `html_url`, and timestamps if useful. The takehome does not need an ingestion job engine or a normalized agency catalog.
 
+### Repo shape
+
+```text
+apps/web/                 Next.js App Router: API, page, Drizzle schema/migrations
+pipelines/ingest/         uv project: Federal Register client, normalization, CLI, tests
+compose.yaml              local PostgreSQL
+docs/                     plan, append-only devlog, README links
+```
+
+Keep the two toolchains independent. Run migrations from the web app before ingesting; the Python CLI uses the same Postgres columns through parameterized SQL. Skip Turborepo or a cross-language task runner unless setup proves it necessary.
+
 ## Decisions and assumptions
 
 | Topic | Plan | Reason / follow-up |
@@ -62,7 +73,7 @@ Keep the shared schema small: `documents` with `document_number`, `title`, `publ
 | Database access | Python uses `psycopg` 3 with parameterized SQL, no Python ORM. TypeScript uses Drizzle for schema/migrations and typed queries. | Kysely is a TypeScript query builder, not a Python tool. Keep Python SQL explicit for the SQL-without-ORM discussion. |
 | Client behavior | Start with sequential page requests, bounded timeout, and at most three retries for timeouts, 408, 429, and 5xx. Respect `Retry-After`; fail fast on other 4xx and invalid payloads. | A 100-document run needs about five page requests. Concurrency adds little and risks needless source load. Record status, latency, retries, and terminal error class. |
 | UI | Single responsive list page; search, two date inputs, result count for the current page, and Load more. Use shadcn Button/Input if setup stays quick; native date inputs are fine. | Meets the assignment without spending time on a component library showcase. |
-| Local database | Start with local PostgreSQL and one documented setup command. | Keep hosting out of the critical path. See optional preview note below. |
+| Local database | Start with PostgreSQL from Docker Compose and one documented setup command. | Docker and `psql` are available. Keep hosting out of the critical path. See optional preview note below. |
 
 ### API pagination shape
 
@@ -81,7 +92,7 @@ The database query fetches 21 matches in the requested order. Return the first 2
 
 | Stage | Time | Work | Exit check |
 | --- | ---: | --- | --- |
-| 0. Recon and scaffold | 10 min | Check runtimes and repo shape; probe one Federal Register response for field shape, ordering, next-page behavior, response headers, and practical request size. If this shell still cannot resolve the API, use a recorded fixture for local work and retry the probe from a network-enabled environment. | API assumptions are recorded; app and database start locally. |
+| 0. Recon and scaffold | 10 min | Repo currently has the brief and planning docs only. Node 24.21, `uv` 0.10.6, Docker 29.4, and `psql` 17.7 are available. Probe one Federal Register response for field shape, ordering, next-page behavior, response headers, and practical request size. If this shell still cannot resolve the API, use a recorded fixture for local work and retry the probe from a network-enabled environment. | API assumptions are recorded; app and database start locally. |
 | 1. Tracer bullet | 45 min | Get one representative document through normalize → Postgres → API → rendered list row. Add one migration and one seed/ingest path. | One row is visible from the app against local Postgres. |
 | 2. Complete ingest path | 30 min | Add 100-unique-document paging, upsert, bounded retry classification, and run summary logs. | Two consecutive runs leave row count stable for the same source window; a failure is visible and classified. |
 | 3. Serve contract | 30 min | Add inclusive date filters, case-insensitive search, stable cursor ordering, and limit+1 pagination. | API returns the right ordered rows for unfiltered, filtered, and next-page requests. |
