@@ -23,11 +23,11 @@ Show one clear path from the Federal Register to a searchable page. Keep the wor
 
 1. `document_number` is the stable source identity and has a unique database constraint.
 2. Ingest writes use an upsert inside a transaction; never clear the table before loading. A later run may update a known document without removing other rows.
-3. Archive each fetched source page as a new Parquet file before transforming it. Keep raw document JSON available there; normalize serving fields into Postgres and never overwrite an older archive file.
+3. Archive every received HTTP response as a new line in the run-scoped raw JSONL archive before transforming it. Include run/request provenance and a SHA-256 hash of the response body. Normalize serving fields into Postgres and never overwrite an older archive.
 4. The upstream run stops after 100 unique documents or a confirmed end of results. `count` and `total_pages` are informational only.
 5. The serving API sorts by `(publication_date DESC, document_number DESC)` for deterministic ties. A changed search or date filter starts pagination over.
 6. Network failures and malformed responses are visible as failed runs. Do not log and skip them as if ingest succeeded.
-7. Runtime logs are append-only JSONL files under root `logs/`, ignored by Git. Keep payloads out of logs; use run/request IDs to connect log events to Parquet source pages.
+7. Runtime diagnostics are append-only JSONL files under root `logs/`, ignored by Git. Keep source bodies out of diagnostics; use run/request IDs to connect events to the separate raw response archive.
 
 ## Proposed shape
 
@@ -35,7 +35,7 @@ Show one clear path from the Federal Register to a searchable page. Keep the wor
 Federal Register API
         │ one sequential page request at a time
         ▼
-Python CLI ── raw page ──> immutable Parquet archive
+Python CLI ── raw HTTP response ──> run-scoped JSONL archive
     │ clean + normalize
     └── psycopg parameterized SQL ──> PostgreSQL documents
                                           │
@@ -51,9 +51,9 @@ Python Loguru ──> logs/ingest.jsonl       Pino ──> logs/web.jsonl
 
 Keep the Postgres schema small: `documents` with `document_number`, `title`, `publication_date`, `effective_on`, `abstract`, `agencies` JSON, `html_url`, and timestamps if useful. The takehome does not need an ingestion job engine or a normalized agency catalog.
 
-Write each source page atomically to `data/raw/federalregister/run_id=<id>/page-0001.parquet`. Use PyArrow to write columns for `run_id`, page number, fetch time, `document_number`, and the original document object serialized as `payload_json`. Archive the raw page before cleaning or upserting so a failed database write still leaves input to inspect or replay. Keep `data/raw/` separate from diagnostic logs.
+Append one record per received HTTP response to `data/raw/federalregister/run_id=<id>/responses.jsonl`. Each record should include `run_id`, a unique `request_id`, page and attempt numbers, fetch time, method and requested URL, HTTP status, selected response headers (including the upstream request ID when present), `content_sha256`, and the original response body as UTF-8 text. Decode as UTF-8 strictly and hash the response body bytes before JSON parsing; re-encoding the stored body as UTF-8 must reproduce the hash. Archive successful and unsuccessful HTTP responses before status classification or retry so a failed run can be inspected. A transport failure with no response belongs in diagnostics only. Keep this durable source archive separate from `logs/`.
 
-Write structured events to `logs/ingest.jsonl` and `logs/web.jsonl`. Each line gets a timestamp, level, service, event name, and `run_id` or `request_id`, plus the relevant page, status, duration, count, retry delay, or error class. Never log the full source payload; the Parquet archive owns that detail.
+Write structured events to `logs/ingest.jsonl` and `logs/web.jsonl`. Each line gets a timestamp, level, service, event name, and `run_id` or `request_id`, plus the relevant page, status, duration, count, retry delay, or error class. Never log the full source payload; the raw response archive owns that detail. Ignore `logs/` in Git; keep `data/raw/` as a separate archive path whose persistence/retention is an explicit project choice.
 
 ### Repo shape
 
@@ -73,7 +73,7 @@ pipelines/ingest/
     sources/
       epa_rules.py         EPA + Rule query preset
     workflow.py            unique-document cap and ingest orchestration
-    archive.py             atomic Parquet page snapshots
+    archive.py             append raw HTTP responses to run-scoped JSONL
     normalize.py           raw document to serving row
     store.py               parameterized Postgres upsert
   tests/
@@ -82,7 +82,7 @@ pipelines/ingest/
     test_normalize.py
     test_workflow.py
 compose.yaml              local PostgreSQL
-data/raw/                 immutable Parquet source archive
+data/raw/                 run-scoped JSONL Federal Register response archive
 logs/                     local JSONL diagnostics; ignored by Git
 docs/                     plan, append-only devlog, README links
 ```
@@ -126,7 +126,7 @@ The probe found a page-size inconsistency: `per_page=2` returned two rows, while
 | “A run should ingest 100 documents” | Treat 100 as a per-run target of unique documents, not a lifetime database cap. Stop earlier only when results are exhausted. | Put this in a README “Assumptions” section: “Each run fetches up to 100 distinct Federal Register documents. This is a per-run target, not a lifetime database cap or 100 new-to-database rows. Re-runs upsert matching documents, and existing rows are retained.” |
 | Source pagination | Request `per_page=100` by default (configurable within the documented 1–1000 range), follow `next_page_url` as returned, and count unique document numbers. Stop at 100 unique documents or when the next link is absent/null. | API response links carry an opaque `search_after_cursor`; do not synthesize cursor values. Ignore `count` and `total_pages`. The observed `per_page=1` anomaly is covered by a client fixture. |
 | Do we need an extra upstream page? | No. An absent/null `next_page_url` marks exhaustion; stop earlier at 100 unique documents. | The API provides the continuation link. Do not add a confirmation request or rely on totals. |
-| Raw source archive | Before normalization, write every successful result page to a unique Parquet path under `data/raw/federalregister/run_id=<id>/`. Store the original result object as `payload_json` plus page/run metadata. | Preserves inputs for replay and agent diagnosis if normalization or the DB write fails. Use an atomic temp-file rename; never replace an existing run/page file. |
+| Raw source archive | Append every received HTTP response to `data/raw/federalregister/run_id=<id>/responses.jsonl` before status classification, retry, or normalization. Each line includes run/request IDs, page/attempt, fetch time, method/URL, status, selected response headers, response-body SHA-256, and the response body as UTF-8 text. | Preserves request/response evidence for replay and diagnosis if parsing, normalization, or the DB write fails. This is separate from gitignored diagnostic JSONL under `logs/`; no PyArrow dependency is needed. |
 | Runtime logs | Use Loguru in Python and Pino in the Next.js server for JSONL append sinks at `logs/ingest.jsonl` and `logs/web.jsonl`. Add `/logs/` to root `.gitignore`. | `pinio` interpreted as Pino. Keep human decisions in `docs/devlog.md`; logs hold machine events only. Do not log raw payloads. |
 | API format | Follow JSON:API 1.1 for the supported read-only documents collection: `application/vnd.api+json`, top-level `data`, resource objects (`type: documents`, `id: document_number`, `attributes`), top-level `links.self`/`links.next`, and JSON:API `errors`. | Do not return a custom `{ items, nextCursor }` envelope. This is a scoped read API; writes, relationships, `include`, and compound documents are out of scope. Keep `agencies` as an attribute. |
 | Media negotiation | Return `Content-Type: application/vnd.api+json` and honor JSON:API's `Accept` media-type rules for the supported representation. | No extensions or profiles are needed. Keep negotiation small but spec-correct for the media types and parameters the endpoint supports. |
@@ -173,8 +173,8 @@ Respond with `Content-Type: application/vnd.api+json` and handle `Accept` negoti
 | Stage | Time | Work | Exit check |
 | --- | ---: | --- | --- |
 | 0. API contract | 10 min | Complete: save the OpenAPI snapshot, review endpoint/query schemas, and probe EPA Rules with a small page. Record that response bodies are undocumented, pagination uses `next_page_url`, and no quota headers were observed. | Request, response-envelope, and retry assumptions are recorded. |
-| 1. Ingest tracer bullet | 40 min | Scaffold the uv project and configure the HTTP client. Get one representative EPA Rule through typed query → source page → raw Parquet → normalization → Postgres upsert. | One source page is archived and one row is upserted in local Postgres. |
-| 2. Complete ingest path | 35 min | Add next-link iteration, the 100-unique-document cap, bounded retry classification, append-only page archives, and Loguru run events. | Two fixture runs leave row count stable and create new Parquet pages; failures include a run ID and error class. |
+| 1. Ingest tracer bullet | 40 min | Scaffold the uv project and configure the HTTP client. Get one representative EPA Rule through typed query → source page → raw response JSONL → normalization → Postgres upsert. | One response is archived with provenance/hash and one row is upserted in local Postgres. |
+| 2. Complete ingest path | 35 min | Add next-link iteration, the 100-unique-document cap, bounded retry classification, append-only response archives, and Loguru run events. | Two fixture runs leave row count stable and append separate run archives; failures include a run ID and error class. |
 | 3. Serve and display | 55 min | Add the JSON:API collection/resource envelope, media negotiation, inclusive date filters, case-insensitive search, stable cursor ordering, pagination links/errors, Pino events, and the list UI. | API and UI support search, filters, and Load more; request events are correlated. |
 | 4. Required checks and handoff | 30 min | Add focused tests, write README, run the full local path twice, review logs and git diff, and note known limits. | Required tests pass; README setup works from a clean local database; no unrelated files are committed. |
 
@@ -187,14 +187,14 @@ Total planned time: 170 minutes, leaving 10 minutes of the 3-hour ceiling for se
 - Use fixture pages to test `next_page_url` traversal, same-origin checking, unique `document_number` counting, the 100-document cap, and duplicate IDs across pages. Ignore `count`/`total_pages`.
 - Test the retry classifier separately: transport timeout/connection failure, 408, 429 with delta/date `Retry-After`, 5xx, permanent 4xx, malformed JSON, and missing/invalid page envelope. Retries stay bounded and serial.
 - Emit one structured run summary with `run_id`, pages fetched, unique documents seen, rows inserted/updated, retries, duration, final status, and failure class. Log each retry with status and delay. Avoid a durable run/job subsystem.
-- Read each written Parquet page back and compare `document_number` and `payload_json` with the fixture. Confirm a later run creates a new path and leaves earlier files unchanged.
-- Parse each JSONL line as JSON. Confirm a second run/request appends lines, each event has a correlation ID, and raw source fields stay in Parquet rather than logs.
+- Parse each raw archive line as JSON, re-hash its decoded response body bytes, and compare the body and request metadata with the fixture. Confirm later runs use new run-scoped paths and leave earlier archives unchanged.
+- Parse each diagnostic JSONL line as JSON. Confirm a second run/request appends lines, each event has a correlation ID, and source bodies stay in the raw archive rather than logs.
 - Test `clean_text` with whitespace and markup/entity examples that the implementation actually handles.
 - Test re-run behavior against Postgres: ingest the same fixture twice, assert one row per `document_number`, and assert a previously stored unrelated row remains.
 - Verify the route's media type negotiation and JSON:API structure with no filters, each filter alone, combined filters, invalid dates, and a second cursor page. Confirm `links.next` carries filters and no rows repeat across adjacent pages in a static fixture.
 - Run the UI once with results, no results, loading, and API failure. Confirm it reads `data` and follows `links.next`; changing filters resets the list and current link.
 - Record the exact verification command and result in the devlog for each completed stage.
-- When handing a failure to an agent, include the command, run/request ID, JSONL file path, relevant event/error class, and a small log excerpt. Have the agent inspect those events and the matching Parquet page; do not paste entire source payloads into the log or prompt.
+- When handing a failure to an agent, include the command, run/request ID, JSONL file path, relevant event/error class, and a small log excerpt. Have the agent inspect those events and the matching raw response record; do not paste entire source payloads into the diagnostic log or prompt.
 
 ## Reuse from `pursuit-map`
 
@@ -208,7 +208,7 @@ Check current limits before creating a hosted database: [Neon plans](https://neo
 
 ## More time
 
-Only after the required path works: add a Parquet schema/version marker and retention policy, add an ingestion-run table and resumable checkpoint, use PostgreSQL full-text search, support document detail pages and richer agency filters, add accessibility/keyboard polish, deploy the web app and database, and monitor a scheduled refresh. These are discussion points, not the 2–3 hour target.
+Only after the required path works: add an archive record schema/version marker and retention policy, add an ingestion-run table and resumable checkpoint, use PostgreSQL full-text search, support document detail pages and richer agency filters, add accessibility/keyboard polish, deploy the web app and database, and monitor a scheduled refresh. These are discussion points, not the 2–3 hour target.
 
 ## Submission checklist
 

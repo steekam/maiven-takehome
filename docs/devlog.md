@@ -67,3 +67,9 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Planned the ingest boundary: a reusable synchronous HTTPX client for the `/documents.json` search contract; an EPA Rules query preset for agency/type/date/order/fields; a workflow for page traversal, run cap, deduplication, Parquet archive, normalization, and DB upsert. Keep request transport sequential and retry/timeouts configurable.
 - The official REST API guide also limits pagination to the first 2,000 search results; use a date filter if a future ingest needs a wider source window. Current target is the newest 100 unique documents.
 - **Verification:** `jq` parsed the downloaded schema; two small EPA Rules probes confirmed filter encoding, `fields[]`, result envelope, `next_page_url`, and the `per_page=1` anomaly. No code or tests run.
+
+## 2026-09-24 — Raw response archive format correction
+
+- Superseded the earlier Parquet/PyArrow archive proposal. Keep each received Federal Register HTTP response in run-scoped `data/raw/federalregister/run_id=<id>/responses.jsonl`, with run/request IDs, page and attempt numbers, fetch time, request method/URL, status, selected response headers, UTF-8 response body, and a SHA-256 hash of the exact pre-parse body bytes. Verify the hash by re-encoding the stored body as UTF-8.
+- Keep this source archive separate from the gitignored `logs/` JSONL diagnostic sinks. Diagnostic events carry correlation IDs and operational details but no source body. Normalized application records remain in Postgres. Do not add PyArrow solely for archiving.
+- This is a design decision only; no implementation or tests run.
