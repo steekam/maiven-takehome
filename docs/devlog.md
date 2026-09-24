@@ -149,3 +149,9 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Exported a typed PostgreSQL client factory from `@maiven/db`; the web package keeps a direct Drizzle ORM dependency for query operators while PostgreSQL driver ownership stays with the DB package.
 - Made the required `type` column migration backfill existing EPA Rules rows as `RULE`, then remove the temporary default. The schema remains required with no permanent default.
 - Corrected the current repo-shape entry to `docker-compose.yaml`.
+
+## 2026-09-24 — Parallel ingest and web work boundaries
+
+- Confirmed `packages/db` is the shared schema/migration seam. Ingest owns `pipelines/ingest/**`; web owns `apps/web/**`; keep DB schema and migrations frozen during those implementations, with schema changes routed through integration.
+- Corrected the stale Drizzle ownership and execution-plan entries. Root workspace/lockfile, Varlock run commands, shared docs, migrations, and final integration remain integrator-owned. The web app and Python pipeline scaffolds are implementation work, not existing prerequisites.
+- **Readiness:** ingest and web can be dispatched in parallel against the documented Postgres, source API, and JSON:API contracts. Cross-app verification follows their separate implementation stages.
