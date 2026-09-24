@@ -99,3 +99,11 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Refined the raw JSONL body representation to preserve every response byte: store valid UTF-8 bodies as text and fall back to base64 for invalid UTF-8, with an explicit encoding marker. Hash the original response bytes before parsing.
 - Made `ingest_run_documents` unique on `(run_id, document_number)` so the persistence manifest enforces the per-run unique-document cap. Build summaries from every raw archive attempt, then join successful request IDs through the page and document manifest.
 - No implementation or tests run.
+
+## 2026-09-24 — Page size, agency JSONB, and Drizzle Kit
+
+- Superseded the earlier 100-unique-document run cap. The EPA preset requests `per_page=100` on each source page and follows all `next_page_url` links until absent/null, subject to the API's documented 2,000-result pagination limit. Keep run-wide deduplication and upserts; do not truncate an unexpectedly larger response page.
+- Reaffirmed the source agency objects as an `agencies jsonb` array on `documents`; no separate agency catalog. For a future agency filter, JSONB containment (`agencies @> '[{"slug":"…"}]'::jsonb`) can use a GIN index. Defer the index for this small EPA-only dataset; a partial EPA index would likely cover nearly every row. Partial indexes also require a query predicate that implies the index predicate at planning time, which parameterized dynamic filters do not provide.
+- Added Drizzle Kit to the planned setup: `apps/web/src/db/schema.ts` is the Postgres schema source; configure `drizzle.config.ts`, commit generated SQL under `apps/web/drizzle/`, and apply migrations with `drizzle-kit migrate` before Python ingest. Python remains a parameterized Psycopg client of the shared schema.
+- Updated `docs/PLAN.md`; design only. **References:** [PostgreSQL JSONB indexing](https://www.postgresql.org/docs/current/datatype-json.html#JSON-INDEXING), [PostgreSQL partial indexes](https://www.postgresql.org/docs/current/indexes-partial.html), [Drizzle Kit generate](https://orm.drizzle.team/docs/drizzle-kit-generate), [Drizzle Kit migrate](https://orm.drizzle.team/docs/drizzle-kit-migrate).
+- No implementation or tests run.
