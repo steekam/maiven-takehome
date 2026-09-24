@@ -107,3 +107,10 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Added Drizzle Kit to the planned setup: `apps/web/src/db/schema.ts` is the Postgres schema source; configure `drizzle.config.ts`, commit generated SQL under `apps/web/drizzle/`, and apply migrations with `drizzle-kit migrate` before Python ingest. Python remains a parameterized Psycopg client of the shared schema.
 - Updated `docs/PLAN.md`; design only. **References:** [PostgreSQL JSONB indexing](https://www.postgresql.org/docs/current/datatype-json.html#JSON-INDEXING), [PostgreSQL partial indexes](https://www.postgresql.org/docs/current/indexes-partial.html), [Drizzle Kit generate](https://orm.drizzle.team/docs/drizzle-kit-generate), [Drizzle Kit migrate](https://orm.drizzle.team/docs/drizzle-kit-migrate).
 - No implementation or tests run.
+
+## 2026-09-24 — Clarify the 100-document run target
+
+- Corrected the latest pagination interpretation: each run ingests up to 100 unique `document_number`s, or fewer if the source is exhausted. This is a per-run target, not a 100-row lifetime database cap. `per_page=100` remains an independent upstream request size; duplicates do not count toward the target. Archive the full fetched response, but persist only the remaining unique allowance for that run.
+- A restart resumes the latest incomplete run by default when its query fingerprint matches, starting from its last committed `next_page_url`. `--new-run` deliberately starts a separate run. A completed run remains complete; the documents table is never truncated, so future runs can retain or update prior records.
+- Updated `docs/PLAN.md` to move run/checkpoint state into the baseline. This supersedes the immediately prior decision to fetch every page until source exhaustion without a run-wide target, while retaining the JSONB agency array and Drizzle Kit migration design.
+- Design only; no implementation or tests run.
