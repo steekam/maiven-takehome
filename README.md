@@ -239,7 +239,7 @@ sequenceDiagram
   UI->>URL: Write shareable query state
   UI->>Query: Request the current result set
   Query->>API: GET /api/documents with filters and sort
-  API->>DB: Full-text and date filters; stable sort
+  API->>DB: Full-text and date filters with stable sort
   DB-->>API: First page
   API-->>Query: JSON:API data + links.next
   Query-->>UI: Show results
