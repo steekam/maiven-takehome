@@ -38,6 +38,8 @@ Responses larger than 32 MiB fail with a bounded archived prefix. `Retry-After` 
 
 Each distinct source metadata payload is retained in `document_versions`, keyed by document number and canonical JSON SHA-256. Run-document rows point to the source version observed on that page. Rule-body XML/HTML is not downloaded. Existing document rows gain a version the next time a run sees them; no historical archive backfill runs automatically. `updated_records` counts upserts to existing rows, including identical metadata; it does not mean every field changed.
 
+Live runs verified first-snapshot creation and run-to-version links for 2,100 documents. They did not ingest any document twice, so retaining a later version after its source payload changes remains an assumption; these runs did not validate that history transition.
+
 ## Daily refresh
 
 The repository includes `scripts/ingest-daily.sh`. It runs the default 100-unique-document ingest through Varlock. To schedule it, create the log directory and add a cron entry; cron uses the host's local timezone:
