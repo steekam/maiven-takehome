@@ -6,28 +6,28 @@
       "idx": 0,
       "version": "7",
       "when": 1790279532548,
-      "tag": "0000_sad_deathbird",
+      "tag": "0000_initial_documents_and_ingest_tables",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
       "when": 1790280412221,
-      "tag": "0001_chilly_steel_serpent",
+      "tag": "0001_add_federal_register_metadata_fields",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
       "when": 1790291432496,
-      "tag": "0002_cloudy_penance",
+      "tag": "0002_track_ingest_run_completion",
       "breakpoints": true
     },
     {
       "idx": 3,
       "version": "7",
       "when": 1790292125009,
-      "tag": "0003_gigantic_abomination",
+      "tag": "0003_preserve_source_document_versions",
       "breakpoints": true
     }
   ]
