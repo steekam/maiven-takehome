@@ -7,13 +7,16 @@ from typing import Any
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
-from maiven_ingest.fields import DOCUMENT_FIELDS, JSONB_FIELDS
+from maiven_ingest.document_contract import (
+    DOCUMENT_FIELDS,
+    JSONB_FIELDS,
+    TRANSFORM_VERSION,
+)
 from maiven_ingest.models import (
     SOURCE_RESULT_LIMIT,
     ConcurrentRunError,
     FingerprintMismatchError,
 )
-from maiven_ingest.normalize import TRANSFORM_VERSION
 from maiven_ingest.repository import (
     CommittedPage,
     DocumentLink,

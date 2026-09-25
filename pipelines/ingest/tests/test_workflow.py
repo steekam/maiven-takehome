@@ -13,7 +13,7 @@ from maiven_ingest.archive import RunEvidence
 from maiven_ingest.config import ClientSettings
 from maiven_ingest.federal_register.client import FederalRegisterClient
 from maiven_ingest.models import ResponseAttempt
-from maiven_ingest.normalize import TRANSFORM_VERSION
+from maiven_ingest.document_contract import TRANSFORM_VERSION
 from maiven_ingest.repository import (
     CommittedPage,
     DocumentLink,
@@ -21,8 +21,7 @@ from maiven_ingest.repository import (
     RunReport,
     RunState,
 )
-from maiven_ingest.sources.epa_rules import epa_rules_search
-from maiven_ingest.workflow import IngestWorkflow
+from maiven_ingest.workflow import IngestWorkflow, epa_rules_search
 
 
 BASE_URL = "https://api.test/api/v1/"

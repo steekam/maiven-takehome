@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from maiven_ingest.config import ClientSettings
-from maiven_ingest.fields import DOCUMENT_FIELDS
+from maiven_ingest.document_contract import DOCUMENT_FIELDS
 from maiven_ingest.federal_register.client import FederalRegisterClient
 from maiven_ingest.models import (
     ArchiveReference,
@@ -17,7 +17,7 @@ from maiven_ingest.models import (
     ResponseAttempt,
     TransportFailure,
 )
-from maiven_ingest.sources.epa_rules import epa_rules_search
+from maiven_ingest.workflow import epa_rules_search
 
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures"

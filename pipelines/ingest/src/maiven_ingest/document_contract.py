@@ -1,12 +1,98 @@
+"""Federal Register field contract and normalized document shape."""
+
 from __future__ import annotations
 
 import re
 from datetime import date
 from typing import Any
 
-from maiven_ingest.fields import DOCUMENT_FIELDS, REQUIRED_FIELDS
 from maiven_ingest.models import MalformedPayloadError
 
+DOCUMENT_FIELDS = (
+    "abstract",
+    "action",
+    "agencies",
+    "agency_names",
+    "amendatory_instructions",
+    "body_html_url",
+    "cfr_references",
+    "cfr_topics",
+    "citation",
+    "comment_url",
+    "comments_close_on",
+    "correction_of",
+    "corrections",
+    "dates",
+    "disposition_notes",
+    "docket_id",
+    "docket_ids",
+    "dockets",
+    "document_number",
+    "effective_on",
+    "end_page",
+    "excerpts",
+    "executive_order_notes",
+    "executive_order_number",
+    "explanation",
+    "full_text_xml_url",
+    "html_url",
+    "images",
+    "images_metadata",
+    "json_url",
+    "mods_url",
+    "not_received_for_publication",
+    "page_length",
+    "page_views",
+    "pdf_url",
+    "president",
+    "presidential_document_number",
+    "proclamation_number",
+    "public_inspection_pdf_url",
+    "publication_date",
+    "raw_text_url",
+    "regulation_id_number_info",
+    "regulation_id_numbers",
+    "regulations_dot_gov_info",
+    "regulations_dot_gov_url",
+    "related_documents",
+    "significant",
+    "signing_date",
+    "start_page",
+    "subtype",
+    "title",
+    "toc_doc",
+    "toc_subject",
+    "topics",
+    "type",
+    "volume",
+)
+
+JSONB_FIELDS = frozenset(
+    {
+        "agencies",
+        "agency_names",
+        "amendatory_instructions",
+        "cfr_references",
+        "cfr_topics",
+        "correction_of",
+        "corrections",
+        "docket_ids",
+        "dockets",
+        "images",
+        "images_metadata",
+        "page_views",
+        "president",
+        "regulation_id_number_info",
+        "regulation_id_numbers",
+        "regulations_dot_gov_info",
+        "related_documents",
+        "topics",
+    }
+)
+
+REQUIRED_FIELDS = frozenset(
+    {"document_number", "title", "type", "publication_date", "html_url"}
+)
 
 TEXT_FIELDS = frozenset(
     {
@@ -68,7 +154,9 @@ def normalize_document(document: dict[str, Any]) -> dict[str, Any]:
         if value is not None:
             if field in TEXT_FIELDS:
                 if not isinstance(value, str):
-                    raise MalformedPayloadError(f"Federal Register {field} must be text or null")
+                    raise MalformedPayloadError(
+                        f"Federal Register {field} must be text or null"
+                    )
                 if field in {"title", "abstract"}:
                     value = clean_text(value)
             elif field in DATE_FIELDS:
@@ -79,17 +167,25 @@ def normalize_document(document: dict[str, Any]) -> dict[str, Any]:
                         f"Federal Register {field} must be an integer or null"
                     )
             elif field in BOOLEAN_FIELDS and not isinstance(value, bool):
-                raise MalformedPayloadError(f"Federal Register {field} must be boolean or null")
+                raise MalformedPayloadError(
+                    f"Federal Register {field} must be boolean or null"
+                )
         row[field] = value
 
     agencies = row["agencies"]
     if agencies is None:
         raise MalformedPayloadError("Federal Register agencies must be an array of objects")
-    if not isinstance(agencies, list) or any(not isinstance(agency, dict) for agency in agencies):
+    if not isinstance(agencies, list) or any(
+        not isinstance(agency, dict) for agency in agencies
+    ):
         raise MalformedPayloadError("Federal Register agencies must be an array of objects")
     if not row["document_number"].strip():
         raise MalformedPayloadError("Federal Register document_number cannot be blank")
-    if not row["title"].strip() or not row["type"].strip() or not row["html_url"].strip():
+    if (
+        not row["title"].strip()
+        or not row["type"].strip()
+        or not row["html_url"].strip()
+    ):
         raise MalformedPayloadError("Federal Register required text fields cannot be blank")
     return row
 
@@ -100,7 +196,9 @@ def _date_value(field: str, value: Any) -> str:
     try:
         parsed = date.fromisoformat(value)
     except ValueError as error:
-        raise MalformedPayloadError(f"Federal Register {field} must be an ISO date or null") from error
+        raise MalformedPayloadError(
+            f"Federal Register {field} must be an ISO date or null"
+        ) from error
     if parsed.isoformat() != value:
         raise MalformedPayloadError(f"Federal Register {field} must use YYYY-MM-DD")
     return value

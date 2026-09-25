@@ -78,11 +78,10 @@ The main code paths are:
 | Path | Responsibility |
 |---|---|
 | `src/maiven_ingest/cli.py` | Arguments, settings, database connection, exit codes |
-| `src/maiven_ingest/sources/epa_rules.py` | EPA rule search filters and requested fields |
 | `src/maiven_ingest/federal_register/client.py` | HTTP paging, retries, response capture, API validation |
 | `src/maiven_ingest/archive.py` | Append-only response and transport evidence |
-| `src/maiven_ingest/normalize.py` | Field validation and serving-row normalization |
-| `src/maiven_ingest/workflow.py` | Lock, resume, page loop, evidence summary |
+| `src/maiven_ingest/document_contract.py` | Field lists, validation, and serving-row normalization |
+| `src/maiven_ingest/workflow.py` | EPA search definition, lock, resume, page loop, evidence summary |
 | `src/maiven_ingest/store.py` | PostgreSQL transaction, upsert, version and run persistence |
 | `tests/` | Unit and PostgreSQL integration coverage |
 

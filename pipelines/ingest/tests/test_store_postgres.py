@@ -12,9 +12,8 @@ from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from maiven_ingest.fields import DOCUMENT_FIELDS, JSONB_FIELDS
+from maiven_ingest.document_contract import DOCUMENT_FIELDS, JSONB_FIELDS, normalize_document
 from maiven_ingest.models import ConcurrentRunError
-from maiven_ingest.normalize import normalize_document
 from maiven_ingest.repository import PageCommit, PreparedDocument, RunReport
 from maiven_ingest.store import UPSERT_DOCUMENT_SQL, IngestStore
 

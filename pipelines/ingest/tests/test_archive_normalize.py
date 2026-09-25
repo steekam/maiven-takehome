@@ -8,10 +8,15 @@ from pathlib import Path
 import pytest
 
 from maiven_ingest.archive import RunEvidence, decode_archived_body
-from maiven_ingest.fields import DOCUMENT_FIELDS, REQUIRED_FIELDS
+from maiven_ingest.document_contract import (
+    DOCUMENT_FIELDS,
+    REQUIRED_FIELDS,
+    clean_text,
+    normalize_document,
+)
 from maiven_ingest.models import MalformedPayloadError, ResponseAttempt, TransportFailure
-from maiven_ingest.normalize import clean_text, normalize_document
 from maiven_ingest.repository import CommittedPage
+
 
 def test_all_document_fields_match_the_openapi_snapshot_and_normalize(page_one):
     spec_path = Path(__file__).parents[1] / "spec" / "federal-register.openapi.json"

@@ -13,9 +13,8 @@ from maiven_ingest.config import AppSettings
 from maiven_ingest.diagnostics import configure_diagnostics
 from maiven_ingest.federal_register.client import FederalRegisterClient
 from maiven_ingest.models import IngestError
-from maiven_ingest.sources.epa_rules import epa_rules_search
 from maiven_ingest.store import IngestStore
-from maiven_ingest.workflow import IngestWorkflow
+from maiven_ingest.workflow import IngestWorkflow, epa_rules_search
 
 
 def positive_integer(value: str) -> int:

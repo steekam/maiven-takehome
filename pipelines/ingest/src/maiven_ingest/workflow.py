@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from maiven_ingest.archive import RunEvidence
+from maiven_ingest.document_contract import (
+    DOCUMENT_FIELDS,
+    TRANSFORM_VERSION,
+    normalize_document,
+)
 from maiven_ingest.federal_register.client import FederalRegisterClient
 from maiven_ingest.models import (
     ArchiveReference,
@@ -15,12 +20,28 @@ from maiven_ingest.models import (
     ResponseAttempt,
     TransportFailure,
 )
-from maiven_ingest.normalize import TRANSFORM_VERSION, normalize_document
 from maiven_ingest.repository import (
     IngestRepository,
     PageCommit,
     PreparedDocument,
 )
+
+
+def epa_rules_search(
+    *,
+    per_page: int = 100,
+    publication_date_gte: str | None = None,
+    publication_date_lte: str | None = None,
+) -> DocumentSearch:
+    return DocumentSearch(
+        agencies=("environmental-protection-agency",),
+        document_types=("RULE",),
+        per_page=per_page,
+        order="newest",
+        fields=DOCUMENT_FIELDS,
+        publication_date_gte=publication_date_gte,
+        publication_date_lte=publication_date_lte,
+    )
 
 
 class IngestWorkflow:
