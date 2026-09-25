@@ -17,7 +17,11 @@ import {
 
 export type Agency = Record<string, unknown>;
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
-export type IngestRunStatus = "running" | "failed" | "succeeded";
+export type IngestRunStatus = "running" | "failed" | "succeeded" | "partial" | "superseded";
+export type IngestRunCompletionReason =
+  | "target_reached"
+  | "source_exhausted"
+  | "source_limit_reached";
 export type IngestDocumentOutcome = "inserted" | "updated";
 
 export const documents = pgTable(
@@ -89,6 +93,25 @@ export const documents = pgTable(
   ],
 );
 
+export const documentVersions = pgTable(
+  "document_versions",
+  {
+    documentNumber: text("document_number")
+      .notNull()
+      .references(() => documents.documentNumber, { onDelete: "cascade" }),
+    sourceSha256: text("source_sha256").notNull(),
+    sourcePayload: jsonb("source_payload").$type<JsonValue>().notNull(),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("document_versions_document_sha256_unique").on(
+      table.documentNumber,
+      table.sourceSha256,
+    ),
+  ],
+);
+
 export const ingestRuns = pgTable(
   "ingest_runs",
   {
@@ -96,6 +119,9 @@ export const ingestRuns = pgTable(
     status: text("status").$type<IngestRunStatus>().notNull().default("running"),
     queryFingerprint: text("query_fingerprint").notNull(),
     uniqueTarget: integer("unique_target").notNull().default(100),
+    sourceRecordsSeen: integer("source_records_seen").notNull().default(0),
+    transformVersion: text("transform_version").notNull().default("legacy"),
+    completionReason: text("completion_reason").$type<IngestRunCompletionReason>(),
     nextPageUrl: text("next_page_url"),
     pagesFetched: integer("pages_fetched").notNull().default(0),
     uniqueDocumentsSeen: integer("unique_documents_seen").notNull().default(0),
@@ -107,11 +133,18 @@ export const ingestRuns = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   (table) => [
-    check("ingest_runs_status_check", sql`${table.status} in ('running', 'failed', 'succeeded')`),
+    check(
+      "ingest_runs_status_check",
+      sql`${table.status} in ('running', 'failed', 'succeeded', 'partial', 'superseded')`,
+    ),
     check("ingest_runs_unique_target_check", sql`${table.uniqueTarget} > 0`),
     check(
       "ingest_runs_counters_check",
-      sql`${table.pagesFetched} >= 0 and ${table.uniqueDocumentsSeen} >= 0 and ${table.insertedCount} >= 0 and ${table.updatedCount} >= 0 and ${table.retries} >= 0`,
+      sql`${table.pagesFetched} >= 0 and ${table.uniqueDocumentsSeen} >= 0 and ${table.insertedCount} >= 0 and ${table.updatedCount} >= 0 and ${table.retries} >= 0 and ${table.sourceRecordsSeen} >= 0`,
+    ),
+    check(
+      "ingest_runs_completion_reason_check",
+      sql`${table.completionReason} is null or ${table.completionReason} in ('target_reached', 'source_exhausted', 'source_limit_reached')`,
     ),
   ],
 );
@@ -147,6 +180,7 @@ export const ingestRunDocuments = pgTable(
     documentNumber: text("document_number")
       .notNull()
       .references(() => documents.documentNumber),
+    sourceSha256: text("source_sha256"),
     outcome: text("outcome").$type<IngestDocumentOutcome>().notNull(),
   },
   (table) => [
@@ -156,6 +190,11 @@ export const ingestRunDocuments = pgTable(
       foreignColumns: [ingestRunPages.runId, ingestRunPages.requestId],
       name: "ingest_run_documents_page_fk",
     }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.documentNumber, table.sourceSha256],
+      foreignColumns: [documentVersions.documentNumber, documentVersions.sourceSha256],
+      name: "ingest_run_documents_version_fk",
+    }),
     check("ingest_run_documents_outcome_check", sql`${table.outcome} in ('inserted', 'updated')`),
     index("ingest_run_documents_request_idx").on(table.requestId),
   ],

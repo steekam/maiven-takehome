@@ -15,6 +15,20 @@
       "when": 1790280412221,
       "tag": "0001_chilly_steel_serpent",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790291432496,
+      "tag": "0002_cloudy_penance",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790292125009,
+      "tag": "0003_gigantic_abomination",
+      "breakpoints": true
     }
   ]
 }
