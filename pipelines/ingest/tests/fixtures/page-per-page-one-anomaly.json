@@ -1,0 +1,27 @@
+{
+  "count": 1,
+  "total_pages": 1,
+  "next_page_url": null,
+  "results": [
+    {"document_number": "anomaly-01", "title": "Result 1", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/1", "agencies": []},
+    {"document_number": "anomaly-02", "title": "Result 2", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/2", "agencies": []},
+    {"document_number": "anomaly-03", "title": "Result 3", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/3", "agencies": []},
+    {"document_number": "anomaly-04", "title": "Result 4", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/4", "agencies": []},
+    {"document_number": "anomaly-05", "title": "Result 5", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/5", "agencies": []},
+    {"document_number": "anomaly-06", "title": "Result 6", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/6", "agencies": []},
+    {"document_number": "anomaly-07", "title": "Result 7", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/7", "agencies": []},
+    {"document_number": "anomaly-08", "title": "Result 8", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/8", "agencies": []},
+    {"document_number": "anomaly-09", "title": "Result 9", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/9", "agencies": []},
+    {"document_number": "anomaly-10", "title": "Result 10", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/10", "agencies": []},
+    {"document_number": "anomaly-11", "title": "Result 11", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/11", "agencies": []},
+    {"document_number": "anomaly-12", "title": "Result 12", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/12", "agencies": []},
+    {"document_number": "anomaly-13", "title": "Result 13", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/13", "agencies": []},
+    {"document_number": "anomaly-14", "title": "Result 14", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/14", "agencies": []},
+    {"document_number": "anomaly-15", "title": "Result 15", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/15", "agencies": []},
+    {"document_number": "anomaly-16", "title": "Result 16", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/16", "agencies": []},
+    {"document_number": "anomaly-17", "title": "Result 17", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/17", "agencies": []},
+    {"document_number": "anomaly-18", "title": "Result 18", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/18", "agencies": []},
+    {"document_number": "anomaly-19", "title": "Result 19", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/19", "agencies": []},
+    {"document_number": "anomaly-20", "title": "Result 20", "type": "RULE", "publication_date": "2026-09-20", "html_url": "https://example.test/20", "agencies": []}
+  ]
+}

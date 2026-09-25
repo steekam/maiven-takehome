@@ -1,0 +1,17 @@
+{
+  "count": 1,
+  "total_pages": 1,
+  "next_page_url": null,
+  "results": [
+    {
+      "document_number": "2026-00002",
+      "title": "Second EPA rule",
+      "type": "RULE",
+      "publication_date": "2026-09-19",
+      "effective_on": "2026-10-01",
+      "abstract": "Second rule.",
+      "agencies": [{"name": "Environmental Protection Agency", "slug": "environmental-protection-agency"}],
+      "html_url": "https://www.federalregister.gov/documents/2026/09/19/2026-00002/example"
+    }
+  ]
+}
