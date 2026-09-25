@@ -80,7 +80,7 @@ function formatDate(date: string | null) {
 }
 
 function formatTimestamp(timestamp: string | null) {
-  if (!timestamp) return "No successful ingest yet";
+  if (!timestamp) return "Not synced yet";
   return new Intl.DateTimeFormat("en", {
     year: "numeric",
     month: "short",
@@ -266,7 +266,7 @@ export function DocumentLibrary() {
           <h1 className="m-0 max-w-3xl text-3xl font-semibold leading-tight tracking-[-.045em] sm:text-4xl">EPA rules</h1>
           <p className="mb-0 mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">Published in the Federal Register by the U.S. Environmental Protection Agency.</p>
           <p className="mb-0 mt-2 text-xs text-muted-foreground" aria-live="polite">
-            Last successful ingest: {formatTimestamp(freshness?.last_successful_at ?? null)}
+            Last synced: {formatTimestamp(freshness?.last_successful_at ?? null)}
             {freshnessNote ? ` · ${freshnessNote}` : ""}
           </p>
         </div>
@@ -305,8 +305,8 @@ export function DocumentLibrary() {
 
         <div className="overflow-hidden rounded-lg border border-border bg-white">
           <div className="overflow-x-auto" tabIndex={0} aria-label="Scrollable EPA rules results table">
-            <Table className="min-w-[1100px] table-fixed">
-              <colgroup><col className="w-[128px]" /><col className="w-[155px]" /><col className="w-[450px]" /><col className="w-[120px]" /><col className="w-[260px]" /></colgroup>
+            <Table className="min-w-[1300px] table-fixed">
+              <colgroup><col className="w-[128px]" /><col className="w-[155px]" /><col className="w-[450px]" /><col className="w-[120px]" /><col className="w-[260px]" /><col className="w-[185px]" /></colgroup>
               <TableHeader className="bg-[#f6f4f1]">
                 <TableRow className="hover:bg-transparent">
                   {sortColumns.map((column) => {
@@ -316,12 +316,13 @@ export function DocumentLibrary() {
                       <button type="button" className="inline-flex items-center gap-1.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setColumnSort(column.key)}>{column.label}<Icon className={active ? "size-3 text-primary" : "size-3 opacity-45"} /></button>
                     </TableHead>;
                   })}
+                  <TableHead className="h-11 px-4 text-[11px] font-semibold text-muted-foreground">Last synced</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {documents.isPending && <TableRow><TableCell className="h-40 text-center text-sm text-muted-foreground" colSpan={5}>Loading EPA rules…</TableCell></TableRow>}
-                {documents.isError && <TableRow><TableCell className="h-40 text-center text-sm text-destructive" colSpan={5}><strong className="mb-1 block text-foreground">{errorTitle}</strong><span>{documentErrorMessage(documents.error)}</span>{errorRequest?.requestId && <span className="mt-1 block text-xs text-muted-foreground">Reference: {errorRequest.requestId}</span>}<Button type="button" variant="outline" size="sm" className="mx-auto mt-3 block" onClick={() => errorRequest?.code === "INVALID_QUERY" ? resetSearchAndFilters() : void documents.refetch()}>{errorRequest?.code === "INVALID_QUERY" ? "Reset search and filters" : "Try again"}</Button></TableCell></TableRow>}
-                {empty && <TableRow><TableCell className="h-40 text-center text-sm text-muted-foreground" colSpan={5}><strong className="mb-1 block text-foreground">No EPA rules match these filters.</strong>Try changing your search or publication dates.</TableCell></TableRow>}
+                {documents.isPending && <TableRow><TableCell className="h-40 text-center text-sm text-muted-foreground" colSpan={6}>Loading EPA rules…</TableCell></TableRow>}
+                {documents.isError && <TableRow><TableCell className="h-40 text-center text-sm text-destructive" colSpan={6}><strong className="mb-1 block text-foreground">{errorTitle}</strong><span>{documentErrorMessage(documents.error)}</span>{errorRequest?.requestId && <span className="mt-1 block text-xs text-muted-foreground">Reference: {errorRequest.requestId}</span>}<Button type="button" variant="outline" size="sm" className="mx-auto mt-3 block" onClick={() => errorRequest?.code === "INVALID_QUERY" ? resetSearchAndFilters() : void documents.refetch()}>{errorRequest?.code === "INVALID_QUERY" ? "Reset search and filters" : "Try again"}</Button></TableCell></TableRow>}
+                {empty && <TableRow><TableCell className="h-40 text-center text-sm text-muted-foreground" colSpan={6}><strong className="mb-1 block text-foreground">No EPA rules match these filters.</strong>Try changing your search or publication dates.</TableCell></TableRow>}
                 {rows.map((document) => {
                   const { attributes } = document;
                   return <TableRow key={document.id} onClick={() => setSelected(document)} className="cursor-pointer border-border/80 hover:bg-[#faf9f6] focus-within:bg-[#faf9f6]">
@@ -333,6 +334,7 @@ export function DocumentLibrary() {
                     </TableCell>
                     <TableCell className="w-[126px] px-4 py-4"><Badge variant="secondary" className="rounded-md px-2 py-1 text-[11px] font-medium">{attributes.type}</Badge></TableCell>
                     <TableCell className="w-[250px] whitespace-normal px-4 py-4 text-sm leading-5 text-muted-foreground">{attributes.agency_names?.join(", ") || "—"}</TableCell>
+                    <TableCell className="whitespace-nowrap px-4 py-4 text-xs tabular-nums text-muted-foreground">{formatTimestamp(freshness?.last_successful_at ?? null)}</TableCell>
                   </TableRow>;
                 })}
               </TableBody>
@@ -367,6 +369,7 @@ export function DocumentLibrary() {
             <section><h3 className="mb-1 text-sm font-semibold">Document details</h3><dl className="m-0">
               <Detail label="Agency">{currentDocument.agency_names?.join(", ")}</Detail>
               <Detail label="Published">{formatDate(currentDocument.publication_date)}</Detail>
+              <Detail label="Last synced">{formatTimestamp(freshness?.last_successful_at ?? null)}</Detail>
               <Detail label="Effective">{formatDate(currentDocument.effective_on)}</Detail>
               <Detail label="Comments due">{formatDate(currentDocument.comments_close_on)}</Detail>
               <Detail label="Signing date">{formatDate(currentDocument.signing_date)}</Detail>
