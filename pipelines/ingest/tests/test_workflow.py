@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -73,11 +74,13 @@ class ScriptedRepository:
         self.mark_failed_calls: list[tuple[str, str, int]] = []
         self.lock_events: list[str] = []
 
-    def acquire_ingest_lock(self) -> None:
+    @contextmanager
+    def ingest_lock(self):
         self.lock_events.append("acquired")
-
-    def release_ingest_lock(self) -> None:
-        self.lock_events.append("released")
+        try:
+            yield
+        finally:
+            self.lock_events.append("released")
 
     def start_or_resume_run(self, **_arguments) -> RunState:
         if self.start_error is not None:
@@ -163,7 +166,7 @@ def make_workflow(root, repository, handler, *, monkeypatch, retries=0, target=1
         now=lambda: NOW,
     )
     workflow = IngestWorkflow(
-        store=repository,
+        repository=repository,
         client=client,
         search=epa_rules_search(),
         unique_target=target,

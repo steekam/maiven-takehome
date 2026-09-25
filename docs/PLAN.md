@@ -200,19 +200,21 @@ pipelines/ingest/
   src/maiven_ingest/
     cli.py                 parse run/resume/unique-limit options; set exit status
     config.py              environment config and validation
+    diagnostics.py         structured local event logging
     federal_register/
       client.py            HTTP transport, query encoding, retry, page envelope
-      models.py            typed search options and minimal response envelope
-    sources/
-      epa_rules.py         EPA + Rule query preset
+    models.py              typed search options and response envelope
+    document_contract.py   field contract, validation, serving-row normalization
+    repository.py          persistence port and run/page data contracts
+    postgres_repository.py PostgreSQL adapter and atomic page persistence
     workflow.py            page traversal, resume checkpoint, and orchestration
     archive.py             append raw HTTP responses to run-scoped JSONL
-    normalize.py           raw document to serving row
-    store.py               parameterized Postgres upsert
   tests/
     fixtures/
     test_client.py
-    test_normalize.py
+    test_archive_normalize.py
+    test_postgres_repository.py
+    test_postgres_repository_lock.py
     test_workflow.py
 docker-compose.yaml       optional reviewer PostgreSQL service
 data/raw/                 run-scoped JSONL Federal Register response archive
@@ -265,6 +267,7 @@ The probe found a page-size inconsistency: `per_page=2` returned two rows, while
 | “A run should ingest 100 documents” | Target 100 distinct source `document_number`s per run by default, subject to source exhaustion. Configure another positive limit for tests or other runs. Existing database records count toward that run target when encountered; this is not a lifetime table cap or a target of 100 new inserts. | README assumption: “Each run ingests up to 100 distinct Federal Register documents by default. Set `--max-unique-documents` to change the per-run target. If a run is interrupted, rerunning resumes its checkpoint. New runs upsert matching rows and retain all other database records.” |
 | Source pagination | Request `per_page=100` by default, separately enforce the configured unique-document run target (100 by default), and follow `next_page_url` in order until the target or source exhaustion. | API response links carry an opaque `search_after_cursor`; do not synthesize cursor values. Ignore `count` and `total_pages`. Duplicates do not count toward the target. Keep the `per_page=1` anomaly in a client fixture. |
 | Resume after interruption | A normal restart resumes the latest incomplete run when the query fingerprint matches; a mismatch requires `--new-run`. | Checkpoint advancement commits with page upserts and the page manifest. Resume refetches an uncommitted page; stable source IDs and `(run_id, document_number)` prevent duplicate persistence. The configured per-run target is part of the fingerprint. |
+| Single-writer coordination | Acquire one global, session-level PostgreSQL advisory lock before run setup; hold it through the final summary and release it afterward. | PostgreSQL already coordinates runners that share the ingest database, so no separate lock service or lock table is needed. The SQL cursor only issues the request; the PostgreSQL session owns the lock, which survives page commits. Trade-offs: a run holds one database connection; the global key serializes different query/date ranges; advisory locks only coordinate writers that acquire the same key. PostgreSQL releases the lock when the connection closes. |
 | Do we need an extra upstream page? | No. Stop once the configured target (100 by default) has been linked or when `next_page_url` is absent/null, whichever comes first. | The API provides the continuation link. Do not add a confirmation request or rely on totals. |
 | Raw source archive | Append every received HTTP response to `data/raw/federalregister/run_id=<id>/responses.jsonl` before status classification, retry, or normalization. Each line includes run/request IDs, page/attempt, fetch time, method/URL, status, selected response headers (including upstream request ID when present), response-body SHA-256, and losslessly encoded body bytes (UTF-8 text or base64). | Preserves response evidence for replay and diagnosis if parsing, normalization, or the DB write fails. Postgres page/record links associate successful archived responses with persisted document IDs/outcomes. This is separate from gitignored diagnostic JSONL under `logs/`; no PyArrow dependency is needed. |
 | Run evidence boundary | Keep response archives and transport failures in the run's `data/raw/federalregister/run_id=<id>/` directory. Build attempts from per-run evidence plus the PostgreSQL run report; keep `logs/ingest.jsonl` diagnostic only. | Summaries must survive log rotation, missing log files, or logging format changes. One `AttemptRecorder` port lets the HTTP client record both response and transport-failure evidence. |

@@ -13,7 +13,7 @@ from maiven_ingest.config import AppSettings
 from maiven_ingest.diagnostics import configure_diagnostics
 from maiven_ingest.federal_register.client import FederalRegisterClient
 from maiven_ingest.models import IngestError
-from maiven_ingest.store import IngestStore
+from maiven_ingest.postgres_repository import PostgresIngestRepository
 from maiven_ingest.workflow import IngestWorkflow, epa_rules_search
 
 
@@ -79,10 +79,10 @@ def main(argv: list[str] | None = None) -> int:
             publication_date_lte=args.publication_date_lte,
         )
         with psycopg.connect(settings.database_url, row_factory=dict_row) as connection:
-            store = IngestStore(connection)
+            repository = PostgresIngestRepository(connection)
             with FederalRegisterClient(settings.client) as client:
                 workflow = IngestWorkflow(
-                    store=store,
+                    repository=repository,
                     client=client,
                     search=search,
                     unique_target=args.max_unique_documents,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, ContextManager, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,9 +78,7 @@ class PageCommit:
 
 
 class IngestRepository(Protocol):
-    def acquire_ingest_lock(self) -> None: ...
-
-    def release_ingest_lock(self) -> None: ...
+    def ingest_lock(self) -> ContextManager[None]: ...
 
     def start_or_resume_run(
         self,

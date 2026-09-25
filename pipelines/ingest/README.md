@@ -81,8 +81,9 @@ The main code paths are:
 | `src/maiven_ingest/federal_register/client.py` | HTTP paging, retries, response capture, API validation |
 | `src/maiven_ingest/archive.py` | Append-only response and transport evidence |
 | `src/maiven_ingest/document_contract.py` | Field lists, validation, and serving-row normalization |
+| `src/maiven_ingest/repository.py` | Persistence port and run/page data contracts |
 | `src/maiven_ingest/workflow.py` | EPA search definition, lock, resume, page loop, evidence summary |
-| `src/maiven_ingest/store.py` | PostgreSQL transaction, upsert, version and run persistence |
+| `src/maiven_ingest/postgres_repository.py` | PostgreSQL adapter, atomic page commit, and run persistence |
 | `tests/` | Unit and PostgreSQL integration coverage |
 
 ## Inspect stored data and run evidence
@@ -134,7 +135,7 @@ The web API’s freshness timestamp means an ingest completed successfully. It d
 
 - **Latest-row null policy:** every mapped field replaces its previous value on upsert. Source `null` values and omitted optional fields normalized to `null` clear the latest row. Version snapshots preserve the original JSON shape, so omitted and explicit-null values remain distinguishable. Revisit this policy if consumers need to distinguish “unknown” from “cleared.”
 - **Text cleanup:** normalization trims and collapses whitespace in titles and abstracts. It does not strip markup or decode HTML entities. The raw source payload remains available in `document_versions`.
-- **Single ingest writer:** acquire one global PostgreSQL session advisory lock before run setup and hold it through the final summary. A competing runner fails immediately instead of racing on run selection, page checkpoints, counters, or manifests. The lock serializes different query/date ranges too; that is acceptable while ingestion is sequential. PostgreSQL releases the lock when its connection closes, so an interrupted run can resume from its last committed checkpoint.
+- **Single ingest writer:** use one global PostgreSQL session advisory lock because PostgreSQL is already the shared coordination point for runners writing to the same database. The cursor only sends the lock SQL; PostgreSQL ties lock ownership to the connection session, so page commits do not release it. Acquire it before run setup and hold it through the final summary. A competing runner fails immediately. The global key also serializes different query/date ranges, which is acceptable while ingestion is sequential. Trade-offs: each run holds a database connection, and advisory locks are cooperative—writers that do not acquire this key are not blocked. The explicit unlock runs after the summary; PostgreSQL also releases the lock when the connection closes, so an interrupted run can resume from its last committed checkpoint.
 - **Version history:** the ingest stores each distinct metadata payload it observes. Existing rows gain a first version when a future run sees them; no historical archive backfill runs automatically.
 - **Version validation:** live runs verified initial snapshots and run-to-version links for 2,100 documents, but did not observe a repeated document with changed source metadata. A controlled PostgreSQL integration test verifies that a changed payload creates a new version and links the new run to it. Live source changes remain unverified.
 - **Update counts:** `updated_records` counts upserts to existing rows, including identical metadata. It does not mean a field changed.
