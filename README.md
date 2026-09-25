@@ -15,7 +15,9 @@ For web app setup, request flow, and checks, see the [web README](apps/web/READM
    pnpm db:migrate
    ```
 
-4. Start the web app:
+4. If the database is empty, load EPA documents by following [the web app setup](apps/web/README.md#start-from-a-clone).
+
+5. Start the web app:
 
    ```sh
    pnpm --filter @maiven/web dev

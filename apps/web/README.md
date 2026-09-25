@@ -8,16 +8,24 @@ pipeline writes the source data separately; see the [ingest README](../../pipeli
 ## Before you begin
 
 - Node.js 24 and pnpm 10.15.1.
-- A running PostgreSQL 17 service and a `maiven-takehome` database.
-- Database migrations applied and EPA documents loaded.
+- PostgreSQL 17 installed. The app and ingest pipeline use the local database `maiven-takehome`.
+- For an empty database, Python 3.11 or later, `uv`, and network access to the Federal Register API.
 
-Use the existing local PostgreSQL service for development. See [database setup](../../docs/database.md) to create the database and configure `DATABASE_URL`. Docker Compose Postgres is optional and uses port 5433 by default.
+Use the existing local PostgreSQL service for development. See [database setup](../../docs/database.md) for local PostgreSQL setup. Docker Compose Postgres is optional and uses port 5433 by default.
 
-## Start the app
+## Start from a clone
 
 Run these commands from the repository root.
 
-1. Create the local environment file:
+1. Start the local PostgreSQL service. If the `maiven-takehome` database does not exist, create it as your local PostgreSQL role:
+
+   ```sh
+   createdb maiven-takehome
+   ```
+
+   Skip this command if the database already exists.
+
+2. Create the local environment file:
 
    ```sh
    cp .env.local.example .env.local
@@ -27,14 +35,23 @@ Run these commands from the repository root.
 
    The example also sets `OTEL_EXPORTER_OTLP_ENDPOINT`. Leave it set only when the local telemetry stack is running; clear it to run without telemetry.
 
-2. Install dependencies and apply database migrations:
+3. Install dependencies and apply database migrations:
 
    ```sh
    pnpm install
    pnpm db:migrate
    ```
 
-3. Start the development server:
+4. If the database has no EPA documents, install the ingest dependencies and load an initial set:
+
+   ```sh
+   uv sync --project pipelines/ingest
+   ./scripts/ingest.sh --max-unique-documents 100
+   ```
+
+   The ingest calls the Federal Register API and writes document metadata and run status to PostgreSQL. It targets 100 unique documents by default. Skip this step when the database already contains documents. See the [ingest README](../../pipelines/ingest/README.md) for details.
+
+5. Start the development server:
 
    ```sh
    pnpm --filter @maiven/web dev
