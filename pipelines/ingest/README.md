@@ -86,6 +86,24 @@ The main code paths are:
 | `src/maiven_ingest/postgres_repository.py` | PostgreSQL adapter, atomic page commit, and run persistence |
 | `tests/` | Unit and PostgreSQL integration coverage |
 
+### Persistence boundary
+
+The workflow depends on the `IngestRepository` protocol. `repository.py` defines that
+contract and the run/page data objects; `postgres_repository.py` implements it with
+Psycopg. This keeps API paging and run orchestration independent of SQL.
+
+`commit_page()` persists one accepted page in a single transaction:
+
+1. Lock the run row and verify the page number matches the checkpoint.
+2. Deduplicate document numbers and apply the run target.
+3. Upsert latest document rows and source versions.
+4. Write the page manifest, document links, counters, and next checkpoint.
+
+The workflow enters `ingest_lock()` before run setup and exits after summary
+generation. The PostgreSQL adapter acquires and releases the session-level advisory
+lock in that context manager. Page transactions use the same connection, so a page
+commit does not release the run lock.
+
 ## Inspect stored data and run evidence
 
 The database stores the latest document projection in `documents`. Each distinct source metadata payload is retained in `document_versions`, keyed by document number and canonical JSON SHA-256. `ingest_runs` stores run state and counters; `ingest_run_pages` records committed pages; `ingest_run_documents` links each accepted source document and outcome to its page and source version.
