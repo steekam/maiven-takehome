@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { acceptsJsonApi, mediaType } from "@/lib/documents/accept";
+import type { DocumentPage } from "@/lib/documents/contracts";
 import type { DocumentApiErrorCode } from "@/lib/documents/errors";
 import { parseDocumentQuery } from "@/lib/documents/query";
 import { readDocuments, readIngestFreshness } from "@/lib/documents/read";
@@ -101,7 +102,7 @@ export async function GET(request: Request) {
       const next = result.nextCursor ? new URL(request.url) : null;
       if (next && result.nextCursor) next.searchParams.set("page[cursor]", result.nextCursor);
 
-      return jsonApi({
+      const body: DocumentPage = {
         jsonapi: { version: "1.1" },
         links: {
           self: `${self.pathname}${self.search}`,
@@ -133,7 +134,8 @@ export async function GET(request: Request) {
             pdf_url: document.pdfUrl,
           },
         })),
-      });
+      };
+      return jsonApi(body);
     } catch (error) {
       recordCurrentException(error);
       const errorCode: DocumentApiErrorCode = error instanceof DatabaseConfigurationError
