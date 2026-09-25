@@ -84,7 +84,7 @@ class AppSettings:
         if not database_url:
             raise RuntimeError(
                 "DATABASE_URL is missing; run the CLI through the root Varlock setup "
-                "(see pipelines/ingest/README.md)"
+                "(see README.md#run-with-local-postgresql)"
             )
         return cls(
             database_url=database_url,
