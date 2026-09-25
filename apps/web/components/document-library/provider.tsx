@@ -3,7 +3,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { createContext, use, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { parseAsString, useQueryState } from "nuqs";
-import type { DocumentResource } from "@/lib/documents/contracts";
+import type { DocumentResource } from "@/lib/documents/schemas";
 import { DocumentLoadError } from "@/lib/documents/errors";
 import type { DocumentSortField } from "@/lib/documents/query";
 import { localDate } from "@/lib/utils";

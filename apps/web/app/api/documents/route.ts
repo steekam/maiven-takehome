@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { acceptsJsonApi, mediaType } from "@/lib/documents/accept";
-import type { DocumentPage } from "@/lib/documents/contracts";
+import type { DocumentPage } from "@/lib/documents/schemas";
 import type { DocumentApiErrorCode } from "@/lib/documents/errors";
 import { parseDocumentQuery } from "@/lib/documents/query";
 import { readDocuments, readIngestFreshness } from "@/lib/documents/read";

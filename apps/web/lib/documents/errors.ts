@@ -9,10 +9,6 @@ export const documentApiErrorCodes = [
 export type DocumentApiErrorCode = (typeof documentApiErrorCodes)[number];
 export type DocumentLoadErrorCode = DocumentApiErrorCode | "NETWORK_ERROR" | "INVALID_RESPONSE";
 
-export function isDocumentApiErrorCode(value: unknown): value is DocumentApiErrorCode {
-  return typeof value === "string" && documentApiErrorCodes.includes(value as DocumentApiErrorCode);
-}
-
 export class DocumentLoadError extends Error {
   readonly retryable: boolean;
 

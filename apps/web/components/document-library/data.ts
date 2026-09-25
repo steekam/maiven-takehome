@@ -1,10 +1,5 @@
-import { DocumentLoadError, isDocumentApiErrorCode } from "@/lib/documents/errors";
-import type { DocumentPage, JsonValue } from "@/lib/documents/contracts";
-
-type ApiErrorPayload = {
-  meta?: { request_id?: unknown } | null;
-  errors?: { code?: unknown; detail?: unknown }[] | null;
-} | null;
+import { documentApiErrorResponseSchema, documentPageSchema, responseMetaSchema, type DocumentPage, type JsonValue } from "@/lib/documents/schemas";
+import { DocumentLoadError } from "@/lib/documents/errors";
 
 export function formatCfrReferences(references: JsonValue[] | null) {
   return references?.map((value) => {
@@ -25,15 +20,19 @@ export function makeApiUrl(query: string, dateFrom: string, dateTo: string, sort
 }
 
 function apiError(payload: unknown, status: number): DocumentLoadError {
-  const body = payload as ApiErrorPayload;
-  const requestId = typeof body?.meta?.request_id === "string" ? body.meta.request_id : null;
-  const firstError = Array.isArray(body?.errors) ? body.errors[0] : null;
-  if (!firstError || !isDocumentApiErrorCode(firstError.code)) {
+  const requestId = responseRequestId(payload);
+  const response = documentApiErrorResponseSchema.safeParse(payload);
+  const error = response.success ? response.data.errors.at(0) : null;
+  if (!error) {
     return new DocumentLoadError("INVALID_RESPONSE", "", status, requestId);
   }
 
-  const message = typeof firstError.detail === "string" ? firstError.detail : "Your search or filters are invalid.";
-  return new DocumentLoadError(firstError.code, message, status, requestId);
+  return new DocumentLoadError(error.code, error.detail ?? "Your search or filters are invalid.", status, requestId);
+}
+
+function responseRequestId(payload: unknown) {
+  const response = responseMetaSchema.safeParse(payload);
+  return response.success ? response.data.meta?.request_id ?? null : null;
 }
 
 export async function fetchPage(url: string, signal: AbortSignal): Promise<DocumentPage> {
@@ -54,5 +53,9 @@ export async function fetchPage(url: string, signal: AbortSignal): Promise<Docum
   }
 
   if (!response.ok) throw apiError(payload, response.status);
-  return payload as DocumentPage;
+  const documentPage = documentPageSchema.safeParse(payload);
+  if (!documentPage.success) {
+    throw new DocumentLoadError("INVALID_RESPONSE", "", response.status, responseRequestId(payload));
+  }
+  return documentPage.data;
 }
