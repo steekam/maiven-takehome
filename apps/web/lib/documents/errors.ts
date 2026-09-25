@@ -10,16 +10,22 @@ export type DocumentApiErrorCode = (typeof documentApiErrorCodes)[number];
 export type DocumentLoadErrorCode = DocumentApiErrorCode | "NETWORK_ERROR" | "INVALID_RESPONSE";
 
 export class DocumentLoadError extends Error {
+  readonly code: DocumentLoadErrorCode;
+  readonly status: number | null;
+  readonly requestId: string | null;
   readonly retryable: boolean;
 
   constructor(
-    readonly code: DocumentLoadErrorCode,
+    code: DocumentLoadErrorCode,
     message: string,
-    readonly status: number | null = null,
-    readonly requestId: string | null = null,
+    status: number | null = null,
+    requestId: string | null = null,
   ) {
     super(message);
     this.name = "DocumentLoadError";
+    this.code = code;
+    this.status = status;
+    this.requestId = requestId;
     this.retryable = code === "DATABASE_UNAVAILABLE" || code === "NETWORK_ERROR";
   }
 }

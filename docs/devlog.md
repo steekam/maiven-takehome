@@ -231,3 +231,8 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Replaced the API error `console.error` JSON line with Pino. Its OpenTelemetry transport sends structured errors to Loki while retaining stdout output and trace/span IDs. Added the Loki-to-Tempo trace link and Tempo-to-Loki span log query. Added a Next.js server external for the worker-thread transport.
 - Updated local stack instructions and the database-unavailable drill. Volumes persist telemetry data; all host ports bind to loopback.
 - **Verification:** Compose config validates; Loki, Tempo, Prometheus, and Grafana are ready, with all three Grafana data sources healthy. Query tests (5/5), typecheck, and production webpack build pass. Live API requests returned 200, 400, 406, and 503; Tempo stored each trace, Loki stored the correlated Pino database-error log, and Prometheus recorded 2xx/4xx/5xx request metrics.
+
+## 2026-09-25 — Align document query with ingest scope
+
+- Removed the serving query's EPA/rule predicates because the ingest pipeline already limits stored records to that collection.
+- Kept latest publication first as the omitted-sort default. Explicit `sort=field` is ascending and `sort=-field` is descending. Added sort direction to API and database spans.

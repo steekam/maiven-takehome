@@ -9,7 +9,9 @@
     "build": "varlock run -- next build",
     "start": "varlock run -- next start",
     "typecheck": "tsc --noEmit",
-    "test:query": "node --experimental-strip-types --test tests/query.test.mjs"
+    "test": "node --experimental-strip-types --import ./tests/register-hooks.mjs --test tests/*.test.mjs",
+    "test:coverage": "node --experimental-strip-types --experimental-test-coverage --test-coverage-include='app/api/documents/route.ts' --test-coverage-include='components/document-library/data.ts' --test-coverage-include='lib/documents/*.ts' --import ./tests/register-hooks.mjs --test tests/*.test.mjs",
+    "test:query": "node --experimental-strip-types --import ./tests/register-hooks.mjs --test tests/query.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export const documentSortFields = [
   "publication_date",
   "document_number",
@@ -6,33 +8,23 @@ export const documentSortFields = [
   "agency",
 ] as const;
 
-export type DocumentSortField = (typeof documentSortFields)[number];
-export type SortDirection = "asc" | "desc";
+const documentSortFieldSchema = z.enum(documentSortFields);
+const sortDirectionSchema = z.enum(["asc", "desc"]);
+const documentCursorSchema = z.object({
+  field: documentSortFieldSchema,
+  direction: sortDirectionSchema,
+  value: z.string(),
+  documentNumber: z.string(),
+  filterKey: z.string(),
+});
 
-export type DocumentQuery = {
-  q: string;
-  dateFrom: string | null;
-  dateTo: string | null;
-  sort: DocumentSortField;
-  direction: SortDirection;
-  pageSize: number;
-  cursor: DocumentCursor | null;
-};
-
-export type DocumentCursor = {
-  field: DocumentSortField;
-  direction: SortDirection;
-  value: string;
-  documentNumber: string;
-  filterKey: string;
-};
-
-export type ParsedDocumentQuery =
-  | { ok: true; query: DocumentQuery }
-  | { ok: false; parameter: string; detail: string };
+export type DocumentSortField = z.infer<typeof documentSortFieldSchema>;
+export type SortDirection = z.infer<typeof sortDirectionSchema>;
+export type DocumentCursor = z.infer<typeof documentCursorSchema>;
 
 const defaultPageSize = 20;
 const maxPageSize = 20;
+const pageSizeError = `Page size must be an integer from 1 to ${maxPageSize}.`;
 const supportedFilters = new Set([
   "filter[q]",
   "filter[publication_date][gte]",
@@ -40,106 +32,162 @@ const supportedFilters = new Set([
 ]);
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
-export function documentFilterKey(q: string, dateFrom: string | null, dateTo: string | null): string {
-  return JSON.stringify([q, dateFrom, dateTo]);
-}
-
 function isDate(value: string): boolean {
   if (!datePattern.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
 }
 
+const sortParameterSchema = z.string().default("-publication_date").transform((value, context) => {
+  const direction: SortDirection = value.startsWith("-") ? "desc" : "asc";
+  const field = direction === "desc" ? value.slice(1) : value;
+  const parsedField = documentSortFieldSchema.safeParse(field);
+  if (!parsedField.success) {
+    context.addIssue({
+      code: "custom",
+      message: `Sort by one of: ${documentSortFields.join(", ")}.`,
+    });
+    return z.NEVER;
+  }
+  return { field: parsedField.data, direction };
+});
+
+const dateBoundSchema = z.string()
+  .refine((value) => value === "" || isDate(value), {
+    error: "Use a valid date in YYYY-MM-DD format.",
+  })
+  .nullable()
+  .optional()
+  .default(null);
+
+const pageSizeSchema = z.preprocess(
+  (value) => value === undefined ? defaultPageSize : Number(value),
+  z.number({ error: pageSizeError })
+    .int({ error: pageSizeError })
+    .min(1, { error: pageSizeError })
+    .max(maxPageSize, { error: pageSizeError }),
+);
+
 function decodeCursor(value: string): DocumentCursor | null {
   try {
     const decoded: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
-    if (typeof decoded !== "object" || decoded === null) return null;
-    const cursor = decoded as Record<string, unknown>;
-    if (
-      typeof cursor.field !== "string" ||
-      !documentSortFields.includes(cursor.field as DocumentSortField) ||
-      (cursor.direction !== "asc" && cursor.direction !== "desc") ||
-      typeof cursor.value !== "string" ||
-      typeof cursor.documentNumber !== "string" ||
-      typeof cursor.filterKey !== "string"
-    ) {
-      return null;
-    }
-    return {
-      field: cursor.field as DocumentSortField,
-      direction: cursor.direction,
-      value: cursor.value,
-      documentNumber: cursor.documentNumber,
-      filterKey: cursor.filterKey,
-    };
+    const cursor = documentCursorSchema.safeParse(decoded);
+    return cursor.success ? cursor.data : null;
   } catch {
     return null;
   }
+}
+
+const cursorParameterSchema = z.string().optional().default("").transform((value, context) => {
+  if (!value) return null;
+  const cursor = decodeCursor(value);
+  if (!cursor) {
+    context.addIssue({ code: "custom", message: "The cursor is invalid." });
+    return z.NEVER;
+  }
+  return cursor;
+});
+
+const supportedFilterParametersSchema = z.array(z.string()).superRefine((parameters, context) => {
+  const unsupported = parameters.find((parameter) =>
+    parameter.startsWith("filter[") && !supportedFilters.has(parameter),
+  );
+  if (unsupported) {
+    context.addIssue({
+      code: "custom",
+      path: [unsupported],
+      message: "This filter is not supported.",
+    });
+  }
+});
+
+const documentQuerySchema = z.object({
+  "filter[q]": z.string()
+    .trim()
+    .max(200, { error: "Search text must be 200 characters or fewer." })
+    .optional()
+    .default(""),
+  "filter[publication_date][gte]": dateBoundSchema,
+  "filter[publication_date][lte]": dateBoundSchema,
+  sort: sortParameterSchema,
+  "page[size]": pageSizeSchema,
+  "page[cursor]": cursorParameterSchema,
+}).superRefine((query, context) => {
+  const dateFrom = query["filter[publication_date][gte]"];
+  const dateTo = query["filter[publication_date][lte]"];
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    context.addIssue({
+      code: "custom",
+      path: ["filter[publication_date]"],
+      message: "The start date must be on or before the end date.",
+    });
+  }
+
+  const cursor = query["page[cursor]"];
+  if (cursor && (cursor.field !== query.sort.field || cursor.direction !== query.sort.direction)) {
+    context.addIssue({
+      code: "custom",
+      path: ["page[cursor]"],
+      message: "The cursor does not match the requested sort.",
+    });
+  }
+  if (cursor && cursor.filterKey !== documentFilterKey(
+    query["filter[q]"],
+    dateFrom,
+    dateTo,
+  )) {
+    context.addIssue({
+      code: "custom",
+      path: ["page[cursor]"],
+      message: "The cursor does not match the requested filters.",
+    });
+  }
+}).transform((query) => ({
+  q: query["filter[q]"],
+  dateFrom: query["filter[publication_date][gte]"],
+  dateTo: query["filter[publication_date][lte]"],
+  sort: query.sort.field,
+  direction: query.sort.direction,
+  pageSize: query["page[size]"],
+  cursor: query["page[cursor]"],
+}));
+
+export type DocumentQuery = z.output<typeof documentQuerySchema>;
+
+export type ParsedDocumentQuery =
+  | { ok: true; query: DocumentQuery }
+  | { ok: false; parameter: string; detail: string };
+
+export function documentFilterKey(q: string, dateFrom: string | null, dateTo: string | null): string {
+  return JSON.stringify([q, dateFrom, dateTo]);
 }
 
 export function encodeCursor(cursor: DocumentCursor): string {
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
-export function parseDocumentQuery(params: URLSearchParams): ParsedDocumentQuery {
-  for (const parameter of params.keys()) {
-    if (parameter.startsWith("filter[") && !supportedFilters.has(parameter)) {
-      return { ok: false, parameter, detail: "This filter is not supported." };
-    }
-  }
-
-  const q = (params.get("filter[q]") ?? "").trim();
-  if (q.length > 200) {
-    return { ok: false, parameter: "filter[q]", detail: "Search text must be 200 characters or fewer." };
-  }
-
-  const dateFrom = params.get("filter[publication_date][gte]");
-  const dateTo = params.get("filter[publication_date][lte]");
-  if (dateFrom && !isDate(dateFrom)) {
-    return { ok: false, parameter: "filter[publication_date][gte]", detail: "Use a valid date in YYYY-MM-DD format." };
-  }
-  if (dateTo && !isDate(dateTo)) {
-    return { ok: false, parameter: "filter[publication_date][lte]", detail: "Use a valid date in YYYY-MM-DD format." };
-  }
-  if (dateFrom && dateTo && dateFrom > dateTo) {
-    return { ok: false, parameter: "filter[publication_date]", detail: "The start date must be on or before the end date." };
-  }
-
-  const sortParam = params.get("sort") ?? "-publication_date";
-  const direction: SortDirection = sortParam.startsWith("-") ? "desc" : "asc";
-  const sort = (direction === "desc" ? sortParam.slice(1) : sortParam) as DocumentSortField;
-  if (!documentSortFields.includes(sort)) {
-    return { ok: false, parameter: "sort", detail: `Sort by one of: ${documentSortFields.join(", ")}.` };
-  }
-
-  const pageSizeParam = params.get("page[size]");
-  const pageSize = pageSizeParam === null ? defaultPageSize : Number(pageSizeParam);
-  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > maxPageSize) {
-    return { ok: false, parameter: "page[size]", detail: `Page size must be an integer from 1 to ${maxPageSize}.` };
-  }
-
-  const cursorParam = params.get("page[cursor]");
-  const cursor = cursorParam ? decodeCursor(cursorParam) : null;
-  if (cursorParam && !cursor) {
-    return { ok: false, parameter: "page[cursor]", detail: "The cursor is invalid." };
-  }
-  if (cursor && (cursor.field !== sort || cursor.direction !== direction)) {
-    return { ok: false, parameter: "page[cursor]", detail: "The cursor does not match the requested sort." };
-  }
-  if (cursor && cursor.filterKey !== documentFilterKey(q, dateFrom, dateTo)) {
-    return { ok: false, parameter: "page[cursor]", detail: "The cursor does not match the requested filters." };
-  }
-
+function invalidQuery(issue: { path: PropertyKey[]; message: string }): ParsedDocumentQuery {
+  const parameter = issue.path[0];
   return {
-    ok: true,
-    query: {
-      q,
-      dateFrom,
-      dateTo,
-      sort,
-      direction,
-      pageSize,
-      cursor,
-    },
+    ok: false,
+    parameter: typeof parameter === "string" ? parameter : "query",
+    detail: issue.message,
   };
+}
+
+export function parseDocumentQuery(params: URLSearchParams): ParsedDocumentQuery {
+  const filterParameters = supportedFilterParametersSchema.safeParse(Array.from(params.keys()));
+  if (!filterParameters.success) return invalidQuery(filterParameters.error.issues[0]);
+
+  const result = documentQuerySchema.safeParse({
+    "filter[q]": params.get("filter[q]") ?? undefined,
+    "filter[publication_date][gte]": params.get("filter[publication_date][gte]"),
+    "filter[publication_date][lte]": params.get("filter[publication_date][lte]"),
+    sort: params.get("sort") ?? undefined,
+    "page[size]": params.get("page[size]") ?? undefined,
+    "page[cursor]": params.get("page[cursor]") ?? undefined,
+  });
+  if (!result.success) return invalidQuery(result.error.issues[0]);
+
+  return { ok: true, query: result.data };
 }

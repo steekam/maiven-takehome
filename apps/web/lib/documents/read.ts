@@ -17,17 +17,31 @@ export function readDocuments(query: DocumentQuery) {
     span.setAttribute("search.enabled", Boolean(query.q));
     span.setAttribute("filter.publication_date", Boolean(query.dateFrom || query.dateTo));
     span.setAttribute("sort.field", query.sort);
+    span.setAttribute("sort.direction", query.direction);
     span.setAttribute("pagination.page_size", query.pageSize);
     return queryDocuments(query);
   });
 }
 
+export function buildCursorCondition(query: DocumentQuery): SQLWrapper | undefined {
+  const cursor = query.cursor;
+  if (!cursor) return undefined;
+
+  const sortExpression = sortExpressions[query.sort];
+  const primaryAfter = query.direction === "asc"
+    ? gt(sortExpression, cursor.value)
+    : lt(sortExpression, cursor.value);
+  if (query.sort === "document_number") return primaryAfter;
+
+  return or(
+    primaryAfter,
+    and(eq(sortExpression, cursor.value), lt(documents.documentNumber, cursor.documentNumber)),
+  )!;
+}
+
 async function queryDocuments(query: DocumentQuery) {
   const sortExpression = sortExpressions[query.sort];
-  const conditions = [
-    sql`lower(${documents.type}) = 'rule'`,
-    sql`${documents.agencies} @> ${JSON.stringify([{ slug: "environmental-protection-agency" }])}::jsonb`,
-  ];
+  const conditions: SQLWrapper[] = [];
 
   if (query.q) {
     const documentSearch = sql`to_tsvector('english', coalesce(${documents.title}, '') || ' ' || coalesce(${documents.abstract}, ''))`;
@@ -36,22 +50,8 @@ async function queryDocuments(query: DocumentQuery) {
   if (query.dateFrom) conditions.push(sql`${documents.publicationDate} >= ${query.dateFrom}`);
   if (query.dateTo) conditions.push(sql`${documents.publicationDate} <= ${query.dateTo}`);
 
-  const cursor = query.cursor;
-  if (cursor) {
-    const primaryAfter = query.direction === "asc"
-      ? gt(sortExpression, cursor.value)
-      : lt(sortExpression, cursor.value);
-    if (query.sort === "document_number") {
-      conditions.push(primaryAfter);
-    } else {
-      conditions.push(
-        or(
-          primaryAfter,
-          and(eq(sortExpression, cursor.value), lt(documents.documentNumber, cursor.documentNumber)),
-        )!,
-      );
-    }
-  }
+  const cursorCondition = buildCursorCondition(query);
+  if (cursorCondition) conditions.push(cursorCondition);
 
   const order = query.direction === "asc" ? asc(sortExpression) : desc(sortExpression);
   const rows = await getDatabase()

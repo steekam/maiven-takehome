@@ -70,6 +70,14 @@ The web interface displays the last successful ingest time. For a daily cron set
 
 The web page keeps search, date bounds, and sorting in the URL. TanStack Query follows the API's `links.next` for Load more. The PDF action prefers the public inspection PDF URI and falls back to the public PDF URI.
 
+An explicit `sort=field` is ascending; prefix a field with `-` for descending (`sort=-field`). With no `sort` parameter, publication date defaults to descending so the latest rules appear first.
+
+### Accept header
+
+The endpoint returns only `application/vnd.api+json`. The `Accept` header can list media types separated by commas, with parameters separated by semicolons. The parser respects quoted values, so commas or semicolons inside quotes are part of a value, not separators.
+
+It accepts an exact JSON:API type, `application/*`, or `*/*`. A `q` quality value from 0 to 1 controls whether a match is acceptable; `q=0` excludes it. The most specific matching range takes precedence, so `application/vnd.api+json;q=0` rejects JSON:API even if `*/*` is acceptable. This endpoint also rejects non-empty `ext` or `profile` parameters on the exact JSON:API type because it does not support those features. If no supported match remains, the route returns `406 Not Acceptable`. The parser is in [`accept.ts`](apps/web/lib/documents/accept.ts).
+
 ## Checks
 
 ```sh

@@ -88,6 +88,7 @@ export async function GET(request: Request) {
     span.setAttribute("search.enabled", Boolean(parsed.query.q));
     span.setAttribute("filter.publication_date", Boolean(parsed.query.dateFrom || parsed.query.dateTo));
     span.setAttribute("sort.field", parsed.query.sort);
+    span.setAttribute("sort.direction", parsed.query.direction);
     span.setAttribute("pagination.page_size", parsed.query.pageSize);
 
     try {
