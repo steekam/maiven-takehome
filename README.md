@@ -2,6 +2,8 @@
 
 Search public Federal Register documents in a read-only web interface.
 
+For web app setup, request flow, and checks, see the [web README](apps/web/README.md).
+
 ## Run locally
 
 1. Install Node.js 24, pnpm 10, and PostgreSQL 17.
