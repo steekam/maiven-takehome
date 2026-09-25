@@ -56,7 +56,7 @@ case "$action" in
     fi
 
     docker compose run --build --rm ingest --max-unique-documents "$documents"
-    docker compose up -d --no-deps web
+    docker compose up -d
     printf '\nWeb app: http://127.0.0.1:3000\n'
     ;;
   ingest)

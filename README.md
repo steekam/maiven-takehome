@@ -1,18 +1,16 @@
-# Maiven takehome
+# Maiven take-home
 
-Search public Federal Register documents in a read-only web interface.
+An end-to-end EPA rule tracker: Python ingests Federal Register documents into
+PostgreSQL; Next.js serves and displays a searchable, read-only library.
 
-For web app setup, request flow, and checks, see the [web README](apps/web/README.md).
+## Run the assessment
 
-## Try the reviewer flow with Docker
+Requirements:
 
-Requirements: Docker Compose and network access to the Federal Register API.
-This starts an isolated Compose project (`maiven-review`) with its own PostgreSQL
-volume. It does not use `.env.local` or the host PostgreSQL service.
-PostgreSQL binds to localhost port 5433 by default. If another service uses that
-port, set `POSTGRES_PORT=5443` when running the script; changing
-`COMPOSE_PROJECT_NAME` isolates volumes and service names but does not change host
-ports.
+- Docker Engine with Docker Compose
+- Internet access to Docker registries and the Federal Register API
+- Free local ports `3000`, `3001`, `3100`, `3200`, `4317`, `4318`, `5433`, and
+  `9090`
 
 From the repository root, run:
 
@@ -20,124 +18,141 @@ From the repository root, run:
 ./scripts/bootstrap-compose.sh
 ```
 
-The script builds the web and Python ingest images, waits for PostgreSQL, applies
-the checked-in migrations, ingests up to 100 EPA rules from the live Federal
-Register API, then starts the web app. Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
-To load fewer documents on the first run, pass `--documents 20`.
+This builds the images, starts PostgreSQL, applies migrations, ingests up to 100
+EPA rules, and starts the web and observability services. Open
+[http://localhost:3000](http://localhost:3000).
 
-To run another ingest later, forward any ingest CLI options:
+Confirm the API is ready:
 
 ```sh
+curl -fsS http://127.0.0.1:3000/api/health
+curl -fsS -H 'Accept: application/vnd.api+json' \
+  http://127.0.0.1:3000/api/documents
+```
+
+Useful commands:
+
+```sh
+# Run another ingest
 ./scripts/bootstrap-compose.sh ingest --max-unique-documents 100
-```
 
-The ingest service writes its archived Federal Register responses and JSON logs
-to Compose volumes named `maiven-review_ingest-data` and
-`maiven-review_ingest-logs`. Its summary prints in the terminal. To stop the
-services while preserving PostgreSQL, archive, and log data, run:
-
-```sh
+# Stop services and keep stored data
 ./scripts/bootstrap-compose.sh stop
+
+# Use another PostgreSQL host port
+env POSTGRES_PORT=5443 ./scripts/bootstrap-compose.sh
 ```
 
-Run `./scripts/bootstrap-compose.sh` again to migrate, ingest, and start the app.
-For a quick image-free local workflow using native PostgreSQL, see the [web
-README](apps/web/README.md#start-from-a-clone).
+The Compose stack is isolated from `.env.local` and the host PostgreSQL service.
 
 ## Run locally
 
-1. Install Node.js 24, pnpm 10, and PostgreSQL 17.
-2. Create the `maiven-takehome` database and configure `DATABASE_URL` as described in [database setup](docs/database.md).
-3. Install workspace dependencies and apply the Drizzle migration:
+Use this path if PostgreSQL is already installed.
+
+Requirements:
+
+- Node.js 24 and pnpm 10.15.1
+- Python 3.11+ and `uv`
+- PostgreSQL 17
+- Internet access for ingest
+
+`pnpm install` installs Varlock for the web, database, and ingest commands.
+
+1. Create the database once (skip if it already exists) and create local
+   config if needed:
+
+   ```sh
+   psql -d postgres -c 'CREATE DATABASE "maiven-takehome";'
+   cp .env.local.example .env.local
+   ```
+
+   Set `DATABASE_URL` in `.env.local` to your local PostgreSQL role. Remove
+   `OTEL_EXPORTER_OTLP_ENDPOINT` unless a local collector is running. Keep an
+   existing `.env.local`; don't overwrite it.
+
+2. Install dependencies, migrate, and ingest the assessment data:
 
    ```sh
    pnpm install
    pnpm db:migrate
+   uv sync --project pipelines/ingest
+   ./scripts/ingest.sh --max-unique-documents 100
    ```
 
-4. If the database is empty, load EPA documents by following [the web app setup](apps/web/README.md#start-from-a-clone).
-
-5. Start the web app:
+3. Start the read-only web app and API:
 
    ```sh
    pnpm --filter @maiven/web dev
    ```
 
-The web dev, build, and start scripts load configuration through Varlock. Telemetry stays off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set; add the local value from `.env.local.example` to `.env.local` to enable it.
+   Open [http://localhost:3000](http://localhost:3000).
 
-## Local telemetry
+## Assessment coverage
 
-Start the observability stack:
+| Requirement | Implementation |
+| --- | --- |
+| Python ingest | Fetches EPA `RULE` documents from the Federal Register API. |
+| 100 documents and pagination | Targets 100 unique document numbers and follows the API's opaque `next_page_url`; it does not trust `count` or `total_pages`. |
+| Safe reruns | Upserts by document number, keeps version snapshots, and resumes matching incomplete runs from a committed checkpoint. |
+| TypeScript and Next.js API | `GET /api/documents` returns stored documents newest first. |
+| Date filter and text search | Supports inclusive publication-date bounds and case-insensitive PostgreSQL full-text search. |
+| 20 at a time | Uses keyset cursors and returns the next request in `links.next`. |
+| Single-page interface | Wires search, date filters, sorting, document details, and **Load More** to URL state and the API. |
+| Meaningful ingest tests | Unit tests cover text cleaning. PostgreSQL integration tests cover rerun upserts and version history when a test database is configured. |
 
-```sh
-docker compose up -d otel-collector loki tempo prometheus grafana
-```
+## Key decisions
 
-When the web app also runs in Compose, use the override so its telemetry goes to
-the collector by service name:
+- PostgreSQL is the shared contract. Drizzle owns schema and migrations;
+  parameterized Psycopg writes ingest data.
+- Ingest follows the source's continuation URL and commits each page atomically.
+  A PostgreSQL advisory lock permits one writer at a time.
+- The API uses JSON:API, Zod query validation, and keyset pagination. Search uses
+  a matching PostgreSQL Generalized Inverted Index (GIN).
+- Search, date, and sort state live in the URL. TanStack Query owns retrieved
+  pages.
+- The first slice stores metadata and links to public PDFs. It does not download
+  rule content.
 
-```sh
-docker compose -f docker-compose.yaml -f docker-compose.observability.yaml \
-  --profile observability up -d
-```
-
-Open Grafana at [http://127.0.0.1:3001](http://127.0.0.1:3001) and sign in with `admin` / `admin` on first launch. Prometheus, Loki, and Tempo are provisioned as data sources. Direct local endpoints are [Prometheus](http://127.0.0.1:9090), [Loki](http://127.0.0.1:3100), and [Tempo](http://127.0.0.1:3200).
-
-The Next.js server sends traces and metrics to the OTLP Collector. Pino sends structured server logs to the collector, which routes traces to Tempo, logs to Loki, and metrics to Prometheus. In Grafana Explore, query errors with `{service_name="maiven-web"} | event="documents_query_failed"`. Open a log’s **Trace ID** link to view its trace; from a Tempo span, use **Logs for this span** to return to Loki. Query request counts with `maiven_api_requests_total`.
-
-Stop the observability services with `docker compose stop otel-collector loki tempo prometheus grafana`.
-
-The first slice traces `GET /api/documents`, PostgreSQL document searches, and ingest freshness reads. It records request counts and durations plus database operation counts and durations. The handled database-error event includes the API request ID and active trace/span IDs. Search terms and document content stay out of telemetry attributes.
-
-To inspect normal traffic, load the library, then use Grafana Explore to search Tempo for `maiven-web` traces or Prometheus for `maiven_api_requests_total` and `maiven_db_operations_total`. Duration histograms are available as `maiven_api_request_duration_milliseconds_bucket` and `maiven_db_operation_duration_milliseconds_bucket`.
-
-For a database failure drill, run a second web process with an unused PostgreSQL port, then request its API:
-
-Terminal 1:
-
-```sh
-env DATABASE_URL=postgresql://maiven:maiven-dev@127.0.0.1:1/maiven-takehome \
-  OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 \
-  PORT=3006 pnpm --filter @maiven/web dev
-```
-
-Terminal 2:
-
-```sh
-curl -H 'Accept: application/vnd.api+json' http://127.0.0.1:3006/api/documents
-```
-
-The request returns 503. In Grafana Explore, find the Pino event in Loki and follow its **Trace ID** link to the failed database child span in Tempo. The `DATABASE_UNAVAILABLE` response and `maiven_api_requests_total{status_class="5xx"}` series confirm the API outcome.
-
-The ingest pipeline can be run separately; see [the ingest README](pipelines/ingest/README.md).
-The web interface displays the last successful ingest time. For a daily cron setup, see the ingest README.
-
-## Documents API
-
-`GET /api/documents` returns a JSON:API 1.1 collection. It supports PostgreSQL English full-text search across titles and abstracts, inclusive publication date bounds, sorting by publication date/document number/title/type/agency, and cursor pagination. Search uses `websearch_to_tsquery`, with a matching GIN index. The page size defaults to 20 and is capped at 20.
-
-```text
-/api/documents?filter[q]=water&filter[publication_date][gte]=2026-01-01&sort=-publication_date&page[size]=20
-```
-
-The web page keeps search, date bounds, and sorting in the URL. TanStack Query follows the API's `links.next` for Load more. The PDF action prefers the public inspection PDF URI and falls back to the public PDF URI.
-
-An explicit `sort=field` is ascending; prefix a field with `-` for descending (`sort=-field`). With no `sort` parameter, publication date defaults to descending so the latest rules appear first.
-
-### Accept header
-
-The endpoint returns only `application/vnd.api+json`. The `Accept` header can list media types separated by commas, with parameters separated by semicolons. The parser respects quoted values, so commas or semicolons inside quotes are part of a value, not separators.
-
-It accepts an exact JSON:API type, `application/*`, or `*/*`. A `q` quality value from 0 to 1 controls whether a match is acceptable; `q=0` excludes it. The most specific matching range takes precedence, so `application/vnd.api+json;q=0` rejects JSON:API even if `*/*` is acceptable. This endpoint also rejects non-empty `ext` or `profile` parameters on the exact JSON:API type because it does not support those features. If no supported match remains, the route returns `406 Not Acceptable`. The parser is in [`accept.ts`](apps/web/lib/documents/accept.ts).
-
-## Checks
-
-```sh
-pnpm --filter @maiven/web typecheck
-pnpm --filter @maiven/web test:query
-pnpm --filter @maiven/web exec next build --webpack
-```
+OpenTelemetry, Grafana, Loki, Tempo, and Prometheus are included to exercise
+production-style request, database, log, and error telemetry. Grafana runs at
+[http://127.0.0.1:3001](http://127.0.0.1:3001) with `admin` / `admin` on first
+launch.
 
 ## More time
 
-Add a schema-driven query descriptor that validates filter/sort/field-selection attributes at runtime and supports JSON:API sparse fieldsets. Add restoration of all pages loaded before refresh if users need deep result position preserved. Consider document detail pages, additional agency filters, accessibility polish, and a one-time archive backfill if existing records need version history.
+### Product
+
+- Ingest and version full rule text, then add semantic search over document
+  content.
+- Let companies describe their industry, locations, operations, substances,
+  and concerns. Rank rules against that profile and explain each match with
+  cited passages.
+- Add saved rules, alerts for new or amended matches, relevance feedback,
+  version comparisons, and team ownership.
+
+### Workflow polish
+
+- Persist the loaded cursor chain so refresh restores all loaded pages and
+  **Load More** continues from the same position.
+- Replace repeated newest-page fetches with incremental update windows. Skip
+  unchanged writes by comparing version hashes.
+- Surface ingest freshness, partial runs, and the latest failure in the UI.
+
+## Develop and test
+
+For native development, use Node.js 24, pnpm 10.15.1, Python 3.11 or later,
+`uv`, Varlock, and PostgreSQL 17. Follow the focused guides:
+
+- [Web app and API](apps/web/README.md)
+- [Ingest pipeline](pipelines/ingest/README.md)
+- [Database setup](docs/database.md)
+
+Run the main checks from the repository root:
+
+```sh
+pnpm --filter @maiven/web typecheck
+pnpm --filter @maiven/web test
+pnpm --filter @maiven/web test:coverage
+pnpm --filter @maiven/web build
+uv run --project pipelines/ingest --extra dev pytest pipelines/ingest/tests
+```
