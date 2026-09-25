@@ -1,0 +1,9 @@
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+WORKDIR /app
+
+COPY pipelines/ingest /app/pipelines/ingest
+RUN uv sync --locked --project /app/pipelines/ingest --no-dev
+
+ENTRYPOINT ["uv", "run", "--project", "/app/pipelines/ingest", "federal-register-ingest"]
+CMD ["--max-unique-documents", "100"]

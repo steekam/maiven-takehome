@@ -6,6 +6,19 @@ The pipeline stores document metadata only. It does not download the rule-body X
 
 ## Get started
 
+For the full reviewer flow, the repository root provides
+[`scripts/bootstrap-compose.sh`](../../scripts/bootstrap-compose.sh). It starts
+the Compose database, applies migrations, ingests live Federal Register data,
+and starts the web app. To run only an additional ingest after bootstrap:
+
+```sh
+./scripts/bootstrap-compose.sh ingest --max-unique-documents 100
+```
+
+The Compose ingest service uses the same CLI and writes response archives and
+logs to named volumes. The local setup below uses the native PostgreSQL service
+and writes those artifacts under `data/raw/` and `logs/`.
+
 ### Requirements
 
 Before you run an ingest, make sure you have:

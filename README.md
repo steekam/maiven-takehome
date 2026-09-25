@@ -4,6 +4,46 @@ Search public Federal Register documents in a read-only web interface.
 
 For web app setup, request flow, and checks, see the [web README](apps/web/README.md).
 
+## Try the reviewer flow with Docker
+
+Requirements: Docker Compose and network access to the Federal Register API.
+This starts an isolated Compose project (`maiven-review`) with its own PostgreSQL
+volume. It does not use `.env.local` or the host PostgreSQL service.
+PostgreSQL binds to localhost port 5433 by default. If another service uses that
+port, set `POSTGRES_PORT=5443` when running the script; changing
+`COMPOSE_PROJECT_NAME` isolates volumes and service names but does not change host
+ports.
+
+From the repository root, run:
+
+```sh
+./scripts/bootstrap-compose.sh
+```
+
+The script builds the web and Python ingest images, waits for PostgreSQL, applies
+the checked-in migrations, ingests up to 100 EPA rules from the live Federal
+Register API, then starts the web app. Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
+To load fewer documents on the first run, pass `--documents 20`.
+
+To run another ingest later, forward any ingest CLI options:
+
+```sh
+./scripts/bootstrap-compose.sh ingest --max-unique-documents 100
+```
+
+The ingest service writes its archived Federal Register responses and JSON logs
+to Compose volumes named `maiven-review_ingest-data` and
+`maiven-review_ingest-logs`. Its summary prints in the terminal. To stop the
+services while preserving PostgreSQL, archive, and log data, run:
+
+```sh
+./scripts/bootstrap-compose.sh stop
+```
+
+Run `./scripts/bootstrap-compose.sh` again to migrate, ingest, and start the app.
+For a quick image-free local workflow using native PostgreSQL, see the [web
+README](apps/web/README.md#start-from-a-clone).
+
 ## Run locally
 
 1. Install Node.js 24, pnpm 10, and PostgreSQL 17.
@@ -31,6 +71,14 @@ Start the observability stack:
 
 ```sh
 docker compose up -d otel-collector loki tempo prometheus grafana
+```
+
+When the web app also runs in Compose, use the override so its telemetry goes to
+the collector by service name:
+
+```sh
+docker compose -f docker-compose.yaml -f docker-compose.observability.yaml \
+  --profile observability up -d
 ```
 
 Open Grafana at [http://127.0.0.1:3001](http://127.0.0.1:3001) and sign in with `admin` / `admin` on first launch. Prometheus, Loki, and Tempo are provisioned as data sources. Direct local endpoints are [Prometheus](http://127.0.0.1:9090), [Loki](http://127.0.0.1:3100), and [Tempo](http://127.0.0.1:3200).

@@ -8,7 +8,7 @@ from pathlib import Path
 def repository_root() -> Path:
     here = Path(__file__).resolve()
     for candidate in here.parents:
-        if (candidate / ".git").exists() and (candidate / "pipelines" / "ingest").is_dir():
+        if (candidate / "pipelines" / "ingest").is_dir():
             return candidate
     raise RuntimeError("could not locate repository root")
 

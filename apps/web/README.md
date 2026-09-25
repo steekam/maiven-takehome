@@ -13,6 +13,8 @@ pipeline writes the source data separately; see the [ingest README](../../pipeli
 
 Use the existing local PostgreSQL service for development. See [database setup](../../docs/database.md) for local PostgreSQL setup. Docker Compose Postgres is optional and uses port 5433 by default.
 
+For a fresh-clone review using Docker Compose, run the root [`bootstrap-compose.sh`](../../scripts/bootstrap-compose.sh) instructions instead. That path starts an isolated Compose PostgreSQL, applies migrations, runs a live ingest, and starts the web app.
+
 ## Start from a clone
 
 Run these commands from the repository root.

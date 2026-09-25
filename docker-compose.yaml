@@ -1,3 +1,5 @@
+name: maiven-review
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -6,7 +8,7 @@ services:
       POSTGRES_USER: maiven
       POSTGRES_PASSWORD: maiven-dev
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -15,7 +17,60 @@ services:
       timeout: 5s
       retries: 10
 
+  bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    command: ["pnpm", "db:migrate"]
+    environment:
+      DATABASE_URL: postgresql://maiven:maiven-dev@postgres:5432/maiven-takehome
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    command:
+      ["pnpm", "--filter", "@maiven/web", "dev", "--hostname", "0.0.0.0"]
+    environment:
+      DATABASE_URL: postgresql://maiven:maiven-dev@postgres:5432/maiven-takehome
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ingest:
+    profiles: ["ingest"]
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    environment:
+      DATABASE_URL: postgresql://maiven:maiven-dev@postgres:5432/maiven-takehome
+    volumes:
+      - ingest-data:/app/data
+      - ingest-logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   otel-collector:
+    profiles: ["observability"]
     image: otel/opentelemetry-collector-contrib:0.161.0
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
@@ -28,6 +83,7 @@ services:
       - tempo
 
   loki:
+    profiles: ["observability"]
     image: grafana/loki:3.7.8
     command: ["-config.file=/etc/loki/config.yaml"]
     volumes:
@@ -37,6 +93,7 @@ services:
       - "127.0.0.1:3100:3100"
 
   tempo:
+    profiles: ["observability"]
     image: grafana/tempo:3.0.3
     command: ["-config.file=/etc/tempo/config.yaml"]
     volumes:
@@ -46,6 +103,7 @@ services:
       - "127.0.0.1:3200:3200"
 
   prometheus:
+    profiles: ["observability"]
     image: prom/prometheus:v3.14.0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -59,6 +117,7 @@ services:
       - otel-collector
 
   grafana:
+    profiles: ["observability"]
     image: grafana/grafana:13.2.2
     volumes:
       - ./ops/telemetry/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -72,6 +131,8 @@ services:
 
 volumes:
   postgres-data:
+  ingest-data:
+  ingest-logs:
   loki-data:
   tempo-data:
   prometheus-data:
