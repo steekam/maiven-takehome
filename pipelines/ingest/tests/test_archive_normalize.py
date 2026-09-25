@@ -30,6 +30,8 @@ def test_all_document_fields_match_the_openapi_snapshot_and_normalize(page_one):
     assert row["agencies"][0]["slug"] == "environmental-protection-agency"
     assert row["page_length"] == 0
     assert row["significant"] is False
+    assert clean_text("  one\n\t two   three  ") == "one two three"
+    assert clean_text(" <p>One &amp; two</p> ") == "<p>One &amp; two</p>"
 
 
 def test_optional_source_properties_become_null_and_missing_agencies_default_to_array():
@@ -63,11 +65,6 @@ def test_required_fields_and_typed_columns_fail_clearly(page_one):
     invalid_agencies = page_one["results"][0] | {"agencies": [{"slug": "epa"}, "bad"]}
     with pytest.raises(MalformedPayloadError, match="agencies"):
         normalize_document(invalid_agencies)
-
-
-def test_clean_text_collapses_whitespace():
-    assert clean_text("  one\n\t two   three  ") == "one two three"
-    assert clean_text(" <p>One &amp; two</p> ") == "<p>One &amp; two</p>"
 
 
 def test_archive_preserves_utf8_and_malformed_bytes_with_exact_hash(tmp_path):

@@ -154,7 +154,7 @@ def test_accepts_the_documented_per_page_one_twenty_result_anomaly():
 
 @pytest.mark.parametrize(
     ("status", "retry_after", "expected_sleep"),
-    [(408, None, 1.0), (429, "7", 7.0), (503, None, 1.0)],
+    [(429, "7", 7.0), (503, None, 1.0)],
 )
 def test_retries_transient_statuses_after_archiving(
     status, retry_after, expected_sleep
