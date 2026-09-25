@@ -12,17 +12,16 @@ import httpx
 
 from maiven_ingest.config import ClientSettings
 from maiven_ingest.models import (
+    AttemptRecorder,
     ArchiveReference,
     DocumentSearch,
     FetchedPage,
     MalformedPayloadError,
     Page,
     PermanentHttpError,
-    ResponseArchiver,
     ResponseAttempt,
     ResponseTooLargeError,
     TransportFailure,
-    TransportFailureHandler,
     TransientRequestError,
 )
 
@@ -96,8 +95,7 @@ class FederalRegisterClient:
         *,
         run_id: str,
         page_number: int,
-        archive_response: ResponseArchiver,
-        on_transport_failure: TransportFailureHandler,
+        attempt_recorder: AttemptRecorder,
     ) -> FetchedPage:
         self.validate_same_origin(url)
         last_request_id = ""
@@ -111,7 +109,7 @@ class FederalRegisterClient:
             try:
                 response = self.http.send(request, stream=True)
             except httpx.TransportError as error:
-                on_transport_failure(
+                attempt_recorder.record_transport_failure(
                     TransportFailure(
                         run_id=run_id,
                         request_id=request_id,
@@ -158,7 +156,7 @@ class FederalRegisterClient:
             status_code = response.status_code
             headers = self._selected_headers(response.headers)
             try:
-                archive_reference = archive_response(
+                archive_reference = attempt_recorder.record_response(
                     ResponseAttempt(
                         run_id=run_id,
                         request_id=request_id,
@@ -186,7 +184,7 @@ class FederalRegisterClient:
             last_status = status_code
 
             if body_error is not None:
-                on_transport_failure(
+                attempt_recorder.record_transport_failure(
                     TransportFailure(
                         run_id=run_id,
                         request_id=request_id,

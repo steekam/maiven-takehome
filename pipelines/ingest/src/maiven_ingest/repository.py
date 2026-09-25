@@ -51,6 +51,32 @@ class RunReport:
     documents: tuple[DocumentLink, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedDocument:
+    normalized: dict[str, Any]
+    source_payload: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        if self.normalized["document_number"] != self.source_payload["document_number"]:
+            raise ValueError("normalized and source documents must have the same document_number")
+
+
+@dataclass(frozen=True, slots=True)
+class PageCommit:
+    run_id: str
+    request_id: str
+    page_number: int
+    fetched_at: datetime
+    http_status: int
+    upstream_request_id: str | None
+    archive_path: str
+    content_sha256: str
+    documents: tuple[PreparedDocument, ...]
+    next_page_url: str | None
+    source_records_seen: int
+    retry_count: int
+
+
 class IngestRepository(Protocol):
     def acquire_ingest_lock(self) -> None: ...
 
@@ -67,23 +93,7 @@ class IngestRepository(Protocol):
 
     def committed_pages(self, run_id: str) -> tuple[CommittedPage, ...]: ...
 
-    def commit_page(
-        self,
-        *,
-        run_id: str,
-        request_id: str,
-        page_number: int,
-        fetched_at: datetime,
-        http_status: int,
-        upstream_request_id: str | None,
-        archive_path: str,
-        content_sha256: str,
-        documents: list[dict[str, Any]],
-        source_documents: list[dict[str, Any]] | None = None,
-        next_page_url: str | None,
-        source_records_seen: int,
-        retry_count: int,
-    ) -> RunState:
+    def commit_page(self, page: PageCommit) -> RunState:
         """Atomically persist one page and its run checkpoint."""
         ...
 

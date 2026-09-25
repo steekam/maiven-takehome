@@ -22,11 +22,13 @@ The run defaults to 100 unique `document_number` values and requests 100 results
 ```text
 Federal Register metadata JSON
   → bounded HTTP fetch + retry
-  → append raw response JSONL; fsync
+  → per-run evidence: raw responses + transport failures; fsync
   → normalize + fingerprint source payload
   → one DB transaction: latest document + metadata version + page/run checkpoint
   → API serves latest rows + ingest freshness
 ```
+
+Run evidence lives under `data/raw/federalregister/run_id=<uuid>/`: `responses.jsonl` holds response bodies and hashes; `transport_failures.jsonl` holds attempts that received no complete response. The run summary joins that evidence with the PostgreSQL report. `logs/ingest.jsonl` remains diagnostics only.
 
 `--max-unique-documents` is the target; `--per-page` controls page size. Run stops when it reaches the target, exhausts the source, or reaches the 2,000-result source ceiling. The first two end as `succeeded`; the ceiling ends as `partial` and CLI exits 2. A transform-version change changes the run fingerprint, so an older incomplete run needs `--new-run`; that option marks prior incomplete runs `superseded`. A single PostgreSQL advisory lock prevents concurrent ingest writers.
 
@@ -38,7 +40,7 @@ Responses larger than 32 MiB fail with a bounded archived prefix. `Retry-After` 
 
 Each distinct source metadata payload is retained in `document_versions`, keyed by document number and canonical JSON SHA-256. Run-document rows point to the source version observed on that page. Rule-body XML/HTML is not downloaded. Existing document rows gain a version the next time a run sees them; no historical archive backfill runs automatically. `updated_records` counts upserts to existing rows, including identical metadata; it does not mean every field changed.
 
-Live runs verified first-snapshot creation and run-to-version links for 2,100 documents. They did not ingest any document twice, so retaining a later version after its source payload changes remains an assumption; these runs did not validate that history transition.
+Live runs verified first-snapshot creation and run-to-version links for 2,100 documents. They did not ingest any document twice. A controlled PostgreSQL integration case now checks that a changed source payload creates a distinct snapshot, updates the latest row, and links the new run to that snapshot. The live API history still has not shown an actual source change for a repeated document.
 
 ## Daily refresh
 
@@ -66,4 +68,4 @@ uv run --project pipelines/ingest --extra dev pytest pipelines/ingest/tests
 
 The PostgreSQL integration test runs when `INGEST_TEST_DATABASE_URL` points to a local test database with the committed migrations applied. It uses unique test document numbers and deletes only its own run and document rows.
 
-Raw HTTP response attempts append to `data/raw/federalregister/run_id=<uuid>/responses.jsonl`. Structured diagnostics append to the gitignored `logs/ingest.jsonl`. The Python project uses Psycopg 3 parameterized SQL and does not manage migrations. Apply the checked-in Drizzle migrations first with `pnpm db:migrate`.
+Per-run response and transport-failure evidence append to the gitignored `data/raw/federalregister/run_id=<uuid>/` directory. Structured diagnostics append to `logs/ingest.jsonl`. The Python project uses Psycopg 3 parameterized SQL and does not manage migrations. Apply the checked-in Drizzle migrations first with `pnpm db:migrate`.

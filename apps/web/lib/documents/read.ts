@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, isNotNull, lt, or, sql, type SQLWrapper } from "drizzle-orm";
 import { documents, ingestRuns } from "@maiven/db/schema";
 import { getDatabase } from "@/lib/server/db";
+import { withDatabaseSpan } from "@/lib/server/telemetry";
 import { documentFilterKey, encodeCursor, type DocumentQuery, type DocumentSortField } from "./query";
 
 const sortExpressions: Record<DocumentSortField, SQLWrapper> = {
@@ -11,7 +12,17 @@ const sortExpressions: Record<DocumentSortField, SQLWrapper> = {
   agency: sql<string>`lower(coalesce(${documents.agencyNames}::text, ''))`,
 };
 
-export async function readDocuments(query: DocumentQuery) {
+export function readDocuments(query: DocumentQuery) {
+  return withDatabaseSpan("documents.search", async (span) => {
+    span.setAttribute("search.enabled", Boolean(query.q));
+    span.setAttribute("filter.publication_date", Boolean(query.dateFrom || query.dateTo));
+    span.setAttribute("sort.field", query.sort);
+    span.setAttribute("pagination.page_size", query.pageSize);
+    return queryDocuments(query);
+  });
+}
+
+async function queryDocuments(query: DocumentQuery) {
   const sortExpression = sortExpressions[query.sort];
   const conditions = [
     sql`lower(${documents.type}) = 'rule'`,
@@ -91,7 +102,11 @@ export async function readDocuments(query: DocumentQuery) {
   };
 }
 
-export async function readIngestFreshness() {
+export function readIngestFreshness() {
+  return withDatabaseSpan("documents.ingest_freshness", queryIngestFreshness);
+}
+
+async function queryIngestFreshness() {
   const db = getDatabase();
   const [lastSuccessRows, latestRunRows] = await Promise.all([
     db.select({ finishedAt: ingestRuns.finishedAt })

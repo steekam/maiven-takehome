@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any, Protocol
 
 
 SOURCE_RESULT_LIMIT = 2000
@@ -176,5 +176,7 @@ class FetchedPage:
     attempts: int
 
 
-ResponseArchiver = Callable[[ResponseAttempt], ArchiveReference]
-TransportFailureHandler = Callable[[TransportFailure], None]
+class AttemptRecorder(Protocol):
+    def record_response(self, attempt: ResponseAttempt) -> ArchiveReference: ...
+
+    def record_transport_failure(self, failure: TransportFailure) -> None: ...

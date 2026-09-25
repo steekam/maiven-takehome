@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
 from typing import Any
 
 from psycopg import Connection
@@ -15,7 +14,14 @@ from maiven_ingest.models import (
     FingerprintMismatchError,
 )
 from maiven_ingest.normalize import TRANSFORM_VERSION
-from maiven_ingest.repository import CommittedPage, DocumentLink, RunReport, RunState
+from maiven_ingest.repository import (
+    CommittedPage,
+    DocumentLink,
+    PageCommit,
+    PreparedDocument,
+    RunReport,
+    RunState,
+)
 
 
 INSERT_COLUMNS = ", ".join(f'"{field}"' for field in DOCUMENT_FIELDS)
@@ -135,23 +141,7 @@ class IngestStore:
             raise RuntimeError(f"ingest run {run_id} no longer exists")
         return _run_state(row)
 
-    def commit_page(
-        self,
-        *,
-        run_id: str,
-        request_id: str,
-        page_number: int,
-        fetched_at: datetime,
-        http_status: int,
-        upstream_request_id: str | None,
-        archive_path: str,
-        content_sha256: str,
-        documents: list[dict[str, Any]],
-        source_documents: list[dict[str, Any]] | None = None,
-        next_page_url: str | None,
-        source_records_seen: int,
-        retry_count: int,
-    ) -> RunState:
+    def commit_page(self, page: PageCommit) -> RunState:
         with self.connection.transaction():
             with self.connection.cursor() as cursor:
                 cursor.execute(
@@ -160,39 +150,37 @@ class IngestStore:
                     WHERE run_id = %s
                     FOR UPDATE
                     """,
-                    (run_id,),
+                    (page.run_id,),
                 )
                 run = cursor.fetchone()
                 if run is None or run["status"] != "running":
-                    raise RuntimeError(f"ingest run {run_id} is not running")
-                if page_number != run["pages_fetched"] + 1:
+                    raise RuntimeError(f"ingest run {page.run_id} is not running")
+                if page.page_number != run["pages_fetched"] + 1:
                     raise RuntimeError("page number does not match the committed checkpoint")
                 cursor.execute(
                     "SELECT document_number FROM ingest_run_documents WHERE run_id = %s",
-                    (run_id,),
+                    (page.run_id,),
                 )
                 seen = {row["document_number"] for row in cursor.fetchall()}
 
-                accepted: list[dict[str, Any]] = []
+                accepted: list[PreparedDocument] = []
                 accepted_numbers: set[str] = set()
-                source_by_number: dict[str, dict[str, Any]] = {}
-                for source_document in source_documents or documents:
-                    source_by_number.setdefault(source_document["document_number"], source_document)
-                for document in documents:
-                    number = document["document_number"]
+                for prepared in page.documents:
+                    number = prepared.normalized["document_number"]
                     if (
                         number in seen
                         or number in accepted_numbers
                         or len(seen) + len(accepted) >= run["unique_target"]
                     ):
                         continue
-                    accepted.append(document)
+                    accepted.append(prepared)
                     accepted_numbers.add(number)
 
                 outcomes: list[tuple[str, str, str]] = []
                 inserted_count = 0
                 updated_count = 0
-                for document in accepted:
+                for prepared in accepted:
+                    document = prepared.normalized
                     values = []
                     for field in DOCUMENT_FIELDS:
                         value = document[field]
@@ -203,7 +191,7 @@ class IngestStore:
                     inserted = cursor.fetchone()["inserted"]
                     outcome = "inserted" if inserted else "updated"
                     document_number = document["document_number"]
-                    source_payload = source_by_number[document_number]
+                    source_payload = prepared.source_payload
                     source_canonical = json.dumps(
                         source_payload,
                         sort_keys=True,
@@ -236,14 +224,14 @@ class IngestStore:
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
-                        request_id,
-                        run_id,
-                        page_number,
-                        fetched_at,
-                        http_status,
-                        upstream_request_id,
-                        archive_path,
-                        content_sha256,
+                        page.request_id,
+                        page.run_id,
+                        page.page_number,
+                        page.fetched_at,
+                        page.http_status,
+                        page.upstream_request_id,
+                        page.archive_path,
+                        page.content_sha256,
                     ),
                 )
                 for document_number, outcome, source_sha256 in outcomes:
@@ -253,15 +241,15 @@ class IngestStore:
                             run_id, request_id, document_number, source_sha256, outcome
                         ) VALUES (%s, %s, %s, %s, %s)
                         """,
-                        (run_id, request_id, document_number, source_sha256, outcome),
+                        (page.run_id, page.request_id, document_number, source_sha256, outcome),
                     )
 
                 unique_count = run["unique_documents_seen"] + len(outcomes)
                 if unique_count >= run["unique_target"]:
                     completion_reason = "target_reached"
-                elif source_records_seen >= SOURCE_RESULT_LIMIT:
+                elif page.source_records_seen >= SOURCE_RESULT_LIMIT:
                     completion_reason = "source_limit_reached"
-                elif next_page_url is None:
+                elif page.next_page_url is None:
                     completion_reason = "source_exhausted"
                 else:
                     completion_reason = None
@@ -271,7 +259,7 @@ class IngestStore:
                     else "succeeded" if completed
                     else "running"
                 )
-                checkpoint = None if completed else next_page_url
+                checkpoint = None if completed else page.next_page_url
                 cursor.execute(
                     """
                     UPDATE ingest_runs SET
@@ -293,13 +281,13 @@ class IngestStore:
                         status,
                         completion_reason,
                         checkpoint,
-                        source_records_seen,
+                        page.source_records_seen,
                         unique_count,
                         inserted_count,
                         updated_count,
-                        retry_count,
+                        page.retry_count,
                         completed,
-                        run_id,
+                        page.run_id,
                     ),
                 )
                 return _run_state(cursor.fetchone())

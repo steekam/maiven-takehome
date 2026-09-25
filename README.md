@@ -19,7 +19,43 @@ Search public Federal Register documents in a read-only web interface.
    pnpm --filter @maiven/web dev
    ```
 
-The web dev, build, and start scripts load `DATABASE_URL` through Varlock from the workspace's `.env.local`.
+The web dev, build, and start scripts load configuration through Varlock. Telemetry stays off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set; add the local value from `.env.local.example` to `.env.local` to enable it.
+
+## Local telemetry
+
+Start the observability stack:
+
+```sh
+docker compose up -d otel-collector loki tempo prometheus grafana
+```
+
+Open Grafana at [http://127.0.0.1:3001](http://127.0.0.1:3001) and sign in with `admin` / `admin` on first launch. Prometheus, Loki, and Tempo are provisioned as data sources. Direct local endpoints are [Prometheus](http://127.0.0.1:9090), [Loki](http://127.0.0.1:3100), and [Tempo](http://127.0.0.1:3200).
+
+The Next.js server sends traces and metrics to the OTLP Collector. Pino sends structured server logs to the collector, which routes traces to Tempo, logs to Loki, and metrics to Prometheus. In Grafana Explore, query errors with `{service_name="maiven-web"} | event="documents_query_failed"`. Open a log’s **Trace ID** link to view its trace; from a Tempo span, use **Logs for this span** to return to Loki. Query request counts with `maiven_api_requests_total`.
+
+Stop the observability services with `docker compose stop otel-collector loki tempo prometheus grafana`.
+
+The first slice traces `GET /api/documents`, PostgreSQL document searches, and ingest freshness reads. It records request counts and durations plus database operation counts and durations. The handled database-error event includes the API request ID and active trace/span IDs. Search terms and document content stay out of telemetry attributes.
+
+To inspect normal traffic, load the library, then use Grafana Explore to search Tempo for `maiven-web` traces or Prometheus for `maiven_api_requests_total` and `maiven_db_operations_total`. Duration histograms are available as `maiven_api_request_duration_milliseconds_bucket` and `maiven_db_operation_duration_milliseconds_bucket`.
+
+For a database failure drill, run a second web process with an unused PostgreSQL port, then request its API:
+
+Terminal 1:
+
+```sh
+env DATABASE_URL=postgresql://maiven:maiven-dev@127.0.0.1:1/maiven-takehome \
+  OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 \
+  PORT=3006 pnpm --filter @maiven/web dev
+```
+
+Terminal 2:
+
+```sh
+curl -H 'Accept: application/vnd.api+json' http://127.0.0.1:3006/api/documents
+```
+
+The request returns 503. In Grafana Explore, find the Pino event in Loki and follow its **Trace ID** link to the failed database child span in Tempo. The `DATABASE_UNAVAILABLE` response and `maiven_api_requests_total{status_class="5xx"}` series confirm the API outcome.
 
 The ingest pipeline can be run separately; see [the ingest README](pipelines/ingest/README.md).
 The web interface displays the last successful ingest time. For a daily cron setup, see the ingest README.

@@ -217,3 +217,17 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Added the combined title/abstract GIN expression index to the Drizzle schema and generated migration. Made the migration `IF NOT EXISTS` because the local database already had the index from an earlier run.
 - Updated the README and plan to describe English PostgreSQL full-text search; removed the outdated claim that it remained future work.
 - **Verification:** local migration applied; the index definition and latest migration were confirmed in PostgreSQL; web typecheck passed.
+
+## 2026-09-25 — Add local OpenTelemetry for web API debugging
+
+- Registered `@vercel/otel` through Next.js server instrumentation. Added a request span and child PostgreSQL spans for document search and ingest freshness, with low-cardinality request/database counters and duration histograms.
+- Correlated handled database-error JSON logs with request, trace, and span IDs. Kept search terms, SQL, and document content out of telemetry attributes.
+- Added local OTLP Collector, Jaeger, and Prometheus services. Setting `OTEL_EXPORTER_OTLP_ENDPOINT` enables telemetry; it remains disabled without an endpoint.
+- Documented stack startup, UIs, metrics, and a database-unavailable failure drill in the README. Python instrumentation is assigned to the EPA Ingest pipeline task.
+
+## 2026-09-25 — Replace Jaeger with Grafana observability stack
+
+- Replaced Jaeger with Tempo for traces and added Grafana and Loki. Prometheus remains the metrics store. Grafana provisions all three data sources; OTLP Collector exports traces to Tempo, logs to Loki, and metrics to Prometheus.
+- Replaced the API error `console.error` JSON line with Pino. Its OpenTelemetry transport sends structured errors to Loki while retaining stdout output and trace/span IDs. Added the Loki-to-Tempo trace link and Tempo-to-Loki span log query. Added a Next.js server external for the worker-thread transport.
+- Updated local stack instructions and the database-unavailable drill. Volumes persist telemetry data; all host ports bind to loopback.
+- **Verification:** Compose config validates; Loki, Tempo, Prometheus, and Grafana are ready, with all three Grafana data sources healthy. Query tests (5/5), typecheck, and production webpack build pass. Live API requests returned 200, 400, 406, and 503; Tempo stored each trace, Loki stored the correlated Pino database-error log, and Prometheus recorded 2xx/4xx/5xx request metrics.

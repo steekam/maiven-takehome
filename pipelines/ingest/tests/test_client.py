@@ -14,6 +14,8 @@ from maiven_ingest.models import (
     ArchiveReference,
     MalformedPayloadError,
     PermanentHttpError,
+    ResponseAttempt,
+    TransportFailure,
 )
 from maiven_ingest.sources.epa_rules import epa_rules_search
 
@@ -56,21 +58,20 @@ def make_client(handler, *, retries=0, sleeps=None, now=None):
     )
 
 
-def callbacks(responses=None, transports=None):
-    responses = responses if responses is not None else []
-    transports = transports if transports is not None else []
+class MemoryAttemptRecorder:
+    def __init__(self, responses=None, transports=None):
+        self.responses = responses if responses is not None else []
+        self.transports = transports if transports is not None else []
 
-    def archive(attempt):
-        responses.append(attempt)
+    def record_response(self, attempt: ResponseAttempt) -> ArchiveReference:
+        self.responses.append(attempt)
         return ArchiveReference(
             "data/raw/federalregister/test/responses.jsonl",
             "a" * 64,
         )
 
-    def transport(failure):
-        transports.append(failure)
-
-    return archive, transport
+    def record_transport_failure(self, failure: TransportFailure) -> None:
+        self.transports.append(failure)
 
 
 def test_query_encodes_repeated_filters_dates_and_all_document_fields():
@@ -111,21 +112,19 @@ def test_follows_next_page_link_verbatim_and_ignores_count_totals(page_one, page
         return httpx.Response(200, json=page_two, request=request)
 
     archived = []
-    archive, transport = callbacks(archived)
+    attempt_recorder = MemoryAttemptRecorder(archived)
     with make_client(handler) as client:
         first = client.fetch_page(
             first_url,
             run_id=RUN_ID,
             page_number=1,
-            archive_response=archive,
-            on_transport_failure=transport,
+            attempt_recorder=attempt_recorder,
         )
         second = client.fetch_page(
             first.page.next_page_url,
             run_id=RUN_ID,
             page_number=2,
-            archive_response=archive,
-            on_transport_failure=transport,
+            attempt_recorder=attempt_recorder,
         )
 
     assert requested == [first_url, page_one["next_page_url"]]
@@ -140,7 +139,7 @@ def test_accepts_the_documented_per_page_one_twenty_result_anomaly():
     fixture["count"] = 1
     fixture["total_pages"] = 1
     payload = json.dumps(fixture).encode()
-    archive, transport = callbacks()
+    attempt_recorder = MemoryAttemptRecorder()
     with make_client(
         lambda request: httpx.Response(200, content=payload, request=request)
     ) as client:
@@ -148,8 +147,7 @@ def test_accepts_the_documented_per_page_one_twenty_result_anomaly():
             client.initial_url(epa_rules_search(per_page=1)),
             run_id=RUN_ID,
             page_number=1,
-            archive_response=archive,
-            on_transport_failure=transport,
+            attempt_recorder=attempt_recorder,
         )
     assert len(page.page.results) == 20
 
@@ -173,14 +171,13 @@ def test_retries_transient_statuses_after_archiving(
             return httpx.Response(status, headers=headers, content=b"temporary", request=request)
         return httpx.Response(200, json={"results": []}, request=request)
 
-    archive, transport = callbacks(archived, failures)
+    attempt_recorder = MemoryAttemptRecorder(archived, failures)
     with make_client(handler, retries=1, sleeps=sleeps) as client:
         page = client.fetch_page(
             "https://api.test/api/v1/documents.json",
             run_id=RUN_ID,
             page_number=1,
-            archive_response=archive,
-            on_transport_failure=transport,
+            attempt_recorder=attempt_recorder,
         )
     assert page.retries == 1
     assert [attempt.status_code for attempt in archived] == [status, 200]
@@ -192,7 +189,7 @@ def test_partial_retryable_response_uses_retry_after_and_is_archived():
     archived = []
     failures = []
     sleeps = []
-    archive, transport = callbacks(archived, failures)
+    attempt_recorder = MemoryAttemptRecorder(archived, failures)
     calls = 0
 
     def handler(request):
@@ -212,8 +209,7 @@ def test_partial_retryable_response_uses_retry_after_and_is_archived():
             "https://api.test/api/v1/documents.json",
             run_id=RUN_ID,
             page_number=1,
-            archive_response=archive,
-            on_transport_failure=transport,
+            attempt_recorder=attempt_recorder,
         )
 
     assert result.retries == 1
@@ -228,7 +224,7 @@ def test_partial_permanent_response_fails_without_retry_after_archiving():
     archived = []
     failures = []
     sleeps = []
-    archive, transport = callbacks(archived, failures)
+    attempt_recorder = MemoryAttemptRecorder(archived, failures)
     calls = 0
 
     def handler(request):
@@ -246,8 +242,7 @@ def test_partial_permanent_response_fails_without_retry_after_archiving():
                 "https://api.test/api/v1/documents.json",
                 run_id=RUN_ID,
                 page_number=1,
-                archive_response=archive,
-                on_transport_failure=transport,
+                attempt_recorder=attempt_recorder,
             )
 
     assert calls == 1
@@ -272,14 +267,13 @@ def test_retries_connection_and_timeout_errors_without_response_archive(error_ty
             raise error_type("temporary", request=request)
         return httpx.Response(200, json={"results": []}, request=request)
 
-    archive, transport = callbacks(archived, failures)
+    attempt_recorder = MemoryAttemptRecorder(archived, failures)
     with make_client(handler, retries=1) as client:
         result = client.fetch_page(
             "https://api.test/api/v1/documents.json",
             run_id=RUN_ID,
             page_number=1,
-            archive_response=archive,
-            on_transport_failure=transport,
+            attempt_recorder=attempt_recorder,
         )
     assert result.retries == 1
     assert len(archived) == 1
@@ -289,7 +283,7 @@ def test_retries_connection_and_timeout_errors_without_response_archive(error_ty
 
 def test_permanent_error_is_archived_before_it_is_raised():
     archived = []
-    archive, transport = callbacks(archived)
+    attempt_recorder = MemoryAttemptRecorder(archived)
     with make_client(
         lambda request: httpx.Response(404, content=b"missing", request=request)
     ) as client:
@@ -298,8 +292,7 @@ def test_permanent_error_is_archived_before_it_is_raised():
                 "https://api.test/api/v1/documents.json",
                 run_id=RUN_ID,
                 page_number=1,
-                archive_response=archive,
-                on_transport_failure=transport,
+                attempt_recorder=attempt_recorder,
             )
     assert error.value.status_code == 404
     assert len(archived) == 1
@@ -315,7 +308,7 @@ def test_permanent_error_is_archived_before_it_is_raised():
 )
 def test_malformed_responses_are_archived_before_decode(body, message):
     archived = []
-    archive, transport = callbacks(archived)
+    attempt_recorder = MemoryAttemptRecorder(archived)
     with make_client(
         lambda request: httpx.Response(200, content=body, request=request)
     ) as client:
@@ -324,8 +317,7 @@ def test_malformed_responses_are_archived_before_decode(body, message):
                 "https://api.test/api/v1/documents.json",
                 run_id=RUN_ID,
                 page_number=1,
-                archive_response=archive,
-                on_transport_failure=transport,
+                attempt_recorder=attempt_recorder,
             )
     assert len(archived) == 1
     assert error.value.archive_path.endswith("responses.jsonl")
@@ -333,7 +325,7 @@ def test_malformed_responses_are_archived_before_decode(body, message):
 
 def test_rejects_cross_origin_cursor_after_archiving_the_response():
     archived = []
-    archive, transport = callbacks(archived)
+    attempt_recorder = MemoryAttemptRecorder(archived)
     payload = {"results": [], "next_page_url": "https://evil.test/steal"}
     with make_client(
         lambda request: httpx.Response(200, json=payload, request=request)
@@ -343,8 +335,7 @@ def test_rejects_cross_origin_cursor_after_archiving_the_response():
                 "https://api.test/api/v1/documents.json",
                 run_id=RUN_ID,
                 page_number=1,
-                archive_response=archive,
-                on_transport_failure=transport,
+                attempt_recorder=attempt_recorder,
             )
     assert len(archived) == 1
 
@@ -352,7 +343,7 @@ def test_rejects_cross_origin_cursor_after_archiving_the_response():
 def test_http_date_retry_after_is_respected():
     sleeps = []
     archived = []
-    archive, transport = callbacks(archived)
+    attempt_recorder = MemoryAttemptRecorder(archived)
     now = datetime(2026, 9, 24, 12, 0, 0, tzinfo=UTC)
     retry_date = "Thu, 24 Sep 2026 12:00:09 GMT"
     counter = 0
@@ -369,7 +360,6 @@ def test_http_date_retry_after_is_respected():
             "https://api.test/api/v1/documents.json",
             run_id=RUN_ID,
             page_number=1,
-            archive_response=archive,
-            on_transport_failure=transport,
+            attempt_recorder=attempt_recorder,
         )
     assert sleeps == [9.0]

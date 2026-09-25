@@ -88,7 +88,6 @@ def main(argv: list[str] | None = None) -> int:
                     search=search,
                     unique_target=args.max_unique_documents,
                     repository_root=settings.repository_root,
-                    diagnostics_path=settings.repository_root / "logs" / "ingest.jsonl",
                     logger=event_logger,
                     new_run=args.new_run,
                 )
