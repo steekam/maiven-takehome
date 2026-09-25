@@ -236,3 +236,10 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 
 - Removed the serving query's EPA/rule predicates because the ingest pipeline already limits stored records to that collection.
 - Kept latest publication first as the omitted-sort default. Explicit `sort=field` is ascending and `sort=-field` is descending. Added sort direction to API and database spans.
+
+## 2026-09-25 — Review the acceptance checklist
+
+- Marked all ten acceptance items complete after checking implementation, tests, and recorded live API/UI checks.
+- Updated `docs/PLAN.md` to state the 2,000-source-record partial-run ceiling and the configurable 32 MiB response-body limit. Oversized responses archive a hashed prefix and fail before parsing.
+- **Verification:** `env UV_CACHE_DIR=/private/tmp/maiven-uv-cache uv run --project pipelines/ingest --extra dev pytest pipelines/ingest/tests` passed 30 tests; the PostgreSQL test skipped because no test database URL was set. The complete ingest suite had passed 31/31 against the disposable PostgreSQL database during the repository refactor. `pnpm --filter @maiven/web test` passed 39/39; `pnpm --filter @maiven/web typecheck` and `git diff --check` passed.
+- **Coverage gaps:** no test currently exceeds the configured response-size limit; web cursor no-duplicate behavior has a recorded manual two-page check but no client end-to-end test; responsive breakpoints are source-reviewed, not tested across viewport sizes. The live UI check is recorded earlier in this devlog.

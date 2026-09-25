@@ -71,7 +71,7 @@ flowchart LR
   H --> I
 ```
 
-Each response is archived before parsing. The archive preserves the original response body and its SHA-256 hash; transport failures are recorded separately. The workflow validates and normalizes each source document, then commits the page’s accepted documents, version snapshots, run links, counters, and next-page checkpoint in one database transaction. If that transaction fails, none of those database changes commit.
+Each response is archived before parsing. The archive preserves the complete body and its SHA-256 up to the 32 MiB limit; larger responses store a hashed prefix, mark it incomplete, and fail before parsing. Transport failures are recorded separately. The workflow validates and normalizes each source document, then commits the page’s accepted documents, version snapshots, run links, counters, and next-page checkpoint in one database transaction. If that transaction fails, none of those database changes commit.
 
 The main code paths are:
 
