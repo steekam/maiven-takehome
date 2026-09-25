@@ -87,6 +87,49 @@ Requirements:
 
    Open [http://localhost:3000](http://localhost:3000).
 
+## System flow
+
+```mermaid
+flowchart LR
+  FR["Federal Register API"] -->|"EPA RULE pages<br/>opaque next_page_url"| Ingest["Python ingest"]
+  Ingest -->|"Psycopg upserts + version snapshots<br/>atomic page commits"| DB[(PostgreSQL)]
+  Reviewer --> UI["Next.js UI"]
+  UI <-->|"search · dates · sort"| URL["URL query state"]
+  UI -->|"GET /api/documents · JSON:API"| API["Next.js API"]
+  API -->|"Zod validation · Drizzle query"| DB
+  DB -->|"20 documents + cursor"| API
+  API -->|"data + links.next"| UI
+```
+
+Search and pagination use the same API path. **Load More** follows the returned
+cursor and appends the next page.
+
+```mermaid
+sequenceDiagram
+  actor Reviewer
+  participant UI as Browser UI
+  participant URL as URL query
+  participant Query as TanStack Query
+  participant API as Next.js API
+  participant DB as PostgreSQL
+
+  Reviewer->>UI: Search, set dates, or sort
+  UI->>URL: Write shareable query state
+  UI->>Query: Request the current result set
+  Query->>API: GET /api/documents with filters and sort
+  API->>DB: Full-text/date filters + stable sort
+  DB-->>API: First page
+  API-->>Query: JSON:API data + links.next
+  Query-->>UI: Show results
+  Reviewer->>UI: Load More
+  UI->>Query: Fetch next page
+  Query->>API: Follow links.next cursor
+  API->>DB: Keyset query
+  DB-->>API: Next page
+  API-->>Query: JSON:API data + next cursor
+  Query-->>UI: Append results
+```
+
 ## Assessment coverage
 
 | Requirement | Implementation |
