@@ -208,7 +208,7 @@ pipelines/ingest/
     models.py              typed search options and response envelope
     document_contract.py   field contract, validation, serving-row normalization
     repository.py          persistence port and run/page data contracts
-    postgres_repository.py PostgreSQL adapter and atomic page persistence
+    db.py                  PostgreSQL adapter and atomic page persistence
     workflow.py            page traversal, resume checkpoint, and orchestration
     archive.py             append raw HTTP responses to run-scoped JSONL
   tests/

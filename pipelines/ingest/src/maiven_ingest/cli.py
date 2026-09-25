@@ -13,7 +13,7 @@ from maiven_ingest.config import AppSettings
 from maiven_ingest.diagnostics import configure_diagnostics
 from maiven_ingest.federal_register.client import FederalRegisterClient
 from maiven_ingest.models import IngestError
-from maiven_ingest.postgres_repository import PostgresIngestRepository
+from maiven_ingest.db import PostgresIngestRepository
 from maiven_ingest.workflow import IngestWorkflow, epa_rules_search
 
 

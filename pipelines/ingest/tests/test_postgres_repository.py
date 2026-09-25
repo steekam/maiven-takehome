@@ -15,7 +15,7 @@ from psycopg.types.json import Jsonb
 from maiven_ingest.document_contract import DOCUMENT_FIELDS, JSONB_FIELDS, normalize_document
 from maiven_ingest.models import ConcurrentRunError
 from maiven_ingest.repository import PageCommit, PreparedDocument, RunReport
-from maiven_ingest.postgres_repository import (
+from maiven_ingest.db import (
     UPSERT_DOCUMENT_SQL,
     PostgresIngestRepository,
 )

@@ -83,13 +83,13 @@ The main code paths are:
 | `src/maiven_ingest/document_contract.py` | Field lists, validation, and serving-row normalization |
 | `src/maiven_ingest/repository.py` | Persistence port and run/page data contracts |
 | `src/maiven_ingest/workflow.py` | EPA search definition, lock, resume, page loop, evidence summary |
-| `src/maiven_ingest/postgres_repository.py` | PostgreSQL adapter, atomic page commit, and run persistence |
+| `src/maiven_ingest/db.py` | PostgreSQL adapter, atomic page commit, and run persistence |
 | `tests/` | Unit and PostgreSQL integration coverage |
 
 ### Persistence boundary
 
 The workflow depends on the `IngestRepository` protocol. `repository.py` defines that
-contract and the run/page data objects; `postgres_repository.py` implements it with
+contract and the run/page data objects; `db.py` implements it with
 Psycopg. This keeps API paging and run orchestration independent of SQL.
 
 `commit_page()` persists one accepted page in a single transaction:

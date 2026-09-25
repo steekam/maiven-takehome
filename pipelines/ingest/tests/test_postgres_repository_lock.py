@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from maiven_ingest.postgres_repository import PostgresIngestRepository
+from maiven_ingest.db import PostgresIngestRepository
 
 
 class LockOnlyIngestRepository(PostgresIngestRepository):
