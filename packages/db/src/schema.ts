@@ -90,6 +90,10 @@ export const documents = pgTable(
       table.publicationDate.desc(),
       table.documentNumber.desc(),
     ),
+    index("documents_search_idx").using(
+      "gin",
+      sql`to_tsvector('english', coalesce(${table.title}, '') || ' ' || coalesce(${table.abstract}, ''))`,
+    ),
   ],
 );
 

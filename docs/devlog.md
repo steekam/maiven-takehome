@@ -2,6 +2,15 @@
 
 Append-only record of decisions, work, and verification. Add new entries at the end; do not rewrite old entries.
 
+## 2026-09-25 — Document list and detail sheet
+
+- Refined the presentation around Maiven's coral, violet, teal, and deep-purple palette. Kept the main surface light and editorial so publication dates, document numbers, titles, and agencies scan as a public-record table.
+- Added a row-opened detail sheet. It prioritizes title and type, then summary/action and available document metadata; the footer puts the public PDF first and the Federal Register HTML page second. When a PDF URL is absent, the HTML document becomes the available primary action.
+- Exposed action, docket IDs, CFR references, signing date, and comments deadline from the typed database read through the JSON:API resource. The browser remains read-only.
+- Kept filter, date range, and sort state in URL query parameters and retained the 7-day and 30-day publication shortcuts. Table columns remain sortable.
+- Design references: [Maiven](https://www.maiven.tech/), [USWDS table guidance](https://designsystem.digital.gov/components/table/), [Carbon data table guidance](https://carbondesignsystem.com/components/data-table/usage/), and [WAI-ARIA modal dialog pattern](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/).
+- **Verification:** the optimized Webpack build passed, including its TypeScript phase. Browser review confirmed the row opens the detail sheet, a public PDF URL is presented as the primary action, the 7-day shortcut sets inclusive date parameters in the URL, and Load more appends the next 20 records. The Impeccable detector flagged Plus Jakarta Sans as commonly used; I kept it because the live Maiven site uses the same typeface.
+
 ## 2026-09-24 — Planning baseline
 
 - Read the 2-page candidate brief. Recorded its hard requirements and a 2–3 hour scope in `docs/PLAN.md`.
@@ -155,3 +164,56 @@ Append-only record of decisions, work, and verification. Add new entries at the 
 - Confirmed `packages/db` is the shared schema/migration seam. Ingest owns `pipelines/ingest/**`; web owns `apps/web/**`; keep DB schema and migrations frozen during those implementations, with schema changes routed through integration.
 - Corrected the stale Drizzle ownership and execution-plan entries. Root workspace/lockfile, Varlock run commands, shared docs, migrations, and final integration remain integrator-owned. The web app and Python pipeline scaffolds are implementation work, not existing prerequisites.
 - **Readiness:** ingest and web can be dispatched in parallel against the documented Postgres, source API, and JSON:API contracts. Cross-app verification follows their separate implementation stages.
+
+## 2026-09-25 — Read-only document API and Maiven library
+
+- Added the read-only `/api/documents` JSON:API endpoint and a typed Drizzle read query with title/abstract search, inclusive publication dates, allow-listed sortable columns, 20-row keyset pagination, and public PDF URL preference. Cursors bind to their sort and active filters.
+- Added the Maiven-styled library page with Tailwind v4 and shadcn components, URL-backed search/date/sort state via nuqs, TanStack Query infinite pagination, 7-day/30-day shortcuts, custom dates, sortable columns, and public HTML/PDF links. Routed generated shadcn primitives through the app's local `cn` helper and enabled horizontal table scrolling on narrow screens.
+- Added query parser checks; recorded schema-derived filter validation and restored multi-page state as “More time” items in the plan. The database was unavailable for a successful data fetch during this session.
+- **Verification:** web typecheck passed; 5 query/negotiation tests passed; Next.js production build passed with webpack; `git diff --check` passed. Varlock loaded the workspace `.env.local`; a read-only PostgreSQL query confirmed database `maiven-takehome` and 2,000 documents. The web app returned two successive API pages with unique IDs, preserved the requested cursor in `links.self`, and rejected unsupported `Accept` media types/extensions with 406. Browser checks confirmed the 7-day filter and sort state update the URL, and the live UI rendered document rows and the public PDF action. Web dev/build/start scripts run through Varlock.
+- **Load more UI check:** a browser click initially exposed that absolute pagination links used `localhost` while the preview opened on `127.0.0.1`. Changed `links.self`/`links.next` to same-origin relative paths, rebuilt, and clicked Load more twice: the visible count advanced 20 → 40 → 60 with the earlier rows retained.
+
+## 2026-09-25 — Migrate shadcn primitives to Base UI
+
+- Replaced the Radix Dialog and Slot primitives with Base UI Dialog and Button primitives. Updated Button composition from `asChild` to Base UI's `render` prop; removed the unused Badge `asChild` option.
+- Set shadcn's `components.json` base to `base`, removed `radix-ui` from the web package and lockfile, and updated the sheet transitions to Base UI's `data-starting-style` / `data-ending-style` states.
+- **Verification:** web TypeScript check and production webpack build passed. Browser check opened the document detail sheet, confirmed the public PDF action and document details, and closed it with Escape.
+
+## 2026-09-25 — Search field background
+
+- Removed the dark-preference input fill from the shared Input primitive. The app uses a light surface regardless of OS color preference, so the search field now stays transparent over its white wrapper.
+- **Verification:** browser review confirmed the focused search field has the white surface and violet focus ring without the gray inset fill.
+
+## 2026-09-25 — Scope library to EPA rules
+
+- Updated page title, description, search and result labels to identify the collection as U.S. EPA rules published in the Federal Register. Added a compact agency/rule eyebrow while keeping the existing Maiven visual system.
+- Fixed the read query to include only records whose type is `Rule` and whose agency slug is `environmental-protection-agency`. The stored type is title-cased, so the predicate compares case-insensitively.
+- **Verification:** production webpack build passed. Browser review showed 20 loaded rows, all labeled Rule and Environmental Protection Agency; `git diff --check` passed.
+
+## 2026-09-25 — Simplify EPA library messaging
+
+- Removed the Federal Register status label and repeated hero eyebrow. The page now identifies the collection once and keeps its publication source in a short supporting line.
+- Replaced the footer copy with Maiven's tagline: “We make policy simple, so you can act with confidence.”
+- **Verification:** production webpack build passed; browser review confirmed the revised header, hero, and footer alongside 20 EPA rules.
+
+## 2026-09-25 — Use PostgreSQL full-text search
+
+- Replaced literal substring matching with English full-text search via `websearch_to_tsquery`, searching title and abstract together. Added a matching GIN expression index to the Drizzle schema and migration.
+- Shortened the pagination action to “Load More.”
+- **Verification:** applied the migration to the local PostgreSQL database; production webpack build passed; browser search for “ozone standards” returned matching EPA rules and showed the new button label.
+
+## 2026-09-25 — Separate publication shortcuts
+
+- Added a slim vertical border between the 7-day and 30-day publication shortcuts.
+- **Verification:** production webpack build passed; browser review confirmed the divider renders between the two controls.
+
+## 2026-09-25 — Clarify search and date controls
+
+- Made search span the toolbar width and aligned the loaded-result count beside it. Grouped publication shortcuts and custom date bounds in a bordered panel, with a divider between the quick filters and custom range.
+- **Verification:** production webpack build passed; browser review at the current preview width confirmed the full grouping fits without wrapping.
+
+## 2026-09-25 — Reconcile full-text search index and docs
+
+- Added the combined title/abstract GIN expression index to the Drizzle schema and generated migration. Made the migration `IF NOT EXISTS` because the local database already had the index from an earlier run.
+- Updated the README and plan to describe English PostgreSQL full-text search; removed the outdated claim that it remained future work.
+- **Verification:** local migration applied; the index definition and latest migration were confirmed in PostgreSQL; web typecheck passed.

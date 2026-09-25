@@ -1,7 +1,7 @@
 # Maiven takehome plan
 
-- **Status:** database foundation implemented; ingest and app implementation not started
-- **Updated:** 2026-09-24
+- **Status:** database, ingest, read API, and listing UI implemented and verified against local PostgreSQL
+- **Updated:** 2026-09-25
 - **Time box:** 2–3 hours, matching the candidate brief
 
 ## Goal
@@ -15,11 +15,11 @@ Show one clear path from the Federal Register to a searchable page. Keep the wor
 - [ ] Pagination does not rely on `count` or `total_pages`.
 - [ ] Re-running the ingest does not duplicate documents or delete existing rows.
 - [ ] Every fetched response has a run/request trace and SHA-256 in the separate raw JSONL archive.
-- [ ] `GET /api/documents` returns JSON:API 1.1 collection documents with newest publication dates first, an inclusive publication-date filter, and case-insensitive text search.
-- [ ] The API returns 20 documents per page with valid JSON:API `self`/`next` links and a consistent top-level `meta`; errors use `errors` without `data`.
-- [ ] One page displays documents and wires up filters, search, and Load more.
+- [x] `GET /api/documents` returns a read-only JSON:API 1.1 collection with English full-text search across title/abstract, inclusive publication-date filters, and allowlisted sorting.
+- [x] The API returns up to 20 documents per page with stable, sort-aware cursors, JSON:API `self`/`next` links, consistent `meta`, and errors without `data`.
+- [x] One responsive page displays documents, search, custom/7-day/30-day publication filters, sortable columns, public PDF links, and Load more.
 - [ ] Tests cover text cleaning and ingest re-run behavior.
-- [ ] README explains requirements, setup, how to run, and what more time would change.
+- [x] README explains requirements, setup, how to run, and what more time would change.
 
 ## Deliverable invariants
 
@@ -27,7 +27,7 @@ Show one clear path from the Federal Register to a searchable page. Keep the wor
 2. Ingest writes use an upsert inside a transaction; never clear the table before loading. A later run may update a known document without removing other rows.
 3. Archive every received HTTP response as a new line in the run-scoped raw JSONL archive before transforming it. Include run/request provenance and a SHA-256 hash of the response body. Normalize serving fields into Postgres and never overwrite an older archive.
 4. Each run stops after its configured number of distinct `document_number`s (100 by default) or source exhaustion, whichever comes first. `per_page=100` is the independent request page size; duplicates do not count toward the run target. `count` and `total_pages` are informational only.
-5. The serving API sorts by `(publication_date DESC, document_number DESC)` for deterministic ties. A changed search or date filter starts pagination over.
+5. The serving API defaults to `publication_date DESC`; every sort adds `document_number DESC` as a deterministic tie-breaker. A changed query filter or sort starts pagination over.
 6. Network failures and malformed responses are visible as failed runs. Do not log and skip them as if ingest succeeded.
 7. Runtime diagnostics are append-only JSONL files under root `logs/`, ignored by Git. Keep source bodies out of diagnostics; use run/request IDs to connect events to the separate raw response archive.
 
@@ -269,21 +269,21 @@ The probe found a page-size inconsistency: `per_page=2` returned two rows, while
 | Runtime logs | Use Loguru in Python and Pino in the Next.js server for JSONL append sinks at `logs/ingest.jsonl` and `logs/web.jsonl`. Add `/logs/` to root `.gitignore`. | `pinio` interpreted as Pino. Keep human decisions in `docs/devlog.md`; logs hold machine events only. Do not log raw payloads. |
 | API format | Follow JSON:API 1.1 for the supported read-only documents collection: `application/vnd.api+json`, top-level `data`, resource objects (`type: documents`, `id: document_number`, `attributes`), top-level `links.self`/`links.next`, stable `meta`, and JSON:API `errors`. | Do not return a custom `{ items, nextCursor }` envelope. This is a scoped read API; writes, relationships, `include`, and compound documents are out of scope. Keep `agencies` as an attribute. |
 | Media negotiation | Return `Content-Type: application/vnd.api+json` and honor JSON:API's `Accept` media-type rules for the supported representation. | No extensions or profiles are needed. Keep negotiation small but spec-correct for the media types and parameters the endpoint supports. |
-| Filters and pages | Use `filter[publication_date][gte]`, `filter[publication_date][lte]`, `filter[q]`, `page[size]`, and `page[cursor]`. Default `sort=-publication_date,-document_number`. | JSON:API reserves these query parameter families. Filter meaning remains specific to this API. Enforce a maximum page size of 20. |
+| Filters and pages | Use `filter[publication_date][gte]`, `filter[publication_date][lte]`, `filter[q]`, `page[size]`, and `page[cursor]`. Default `sort=-publication_date`; allow one field from the v1 sort allowlist. | JSON:API reserves these query parameter families. Filter meaning remains specific to this API. Enforce a maximum page size of 20 and reject unsupported `filter[...]` keys. |
 | “Fetch the next 20” | Use keyset/cursor pagination and expose the next request as top-level `links.next`. Query 21 rows; set `links.next` only when row 21 exists, otherwise set it to null. | JSON:API defines pagination links and reserves the `page` parameter family; it does not prescribe cursor encoding. No `COUNT(*)` or total needed. |
-| Cursor sort key | Encode the last visible `(publication_date, document_number)` pair in `page[cursor]`. Carry the same filters and sort in the next link. | This API-specific cursor gives unique, stable ordering and avoids offset shifts when new documents arrive. |
-| Text cleaning and search | Trim and collapse whitespace in title/abstract; preserve agency objects in an `agencies jsonb` array. Search title and abstract with case-insensitive `ILIKE`. | Simple normalization and useful source agency data without a separate agency catalog. |
+| Cursor sort key | Encode the last visible value for the selected sort and `document_number` tie-breaker in `page[cursor]`. Carry filters and sort in the next link. | Each supported sort gets a deterministic keyset cursor; document number is the stable tie-breaker. |
+| Text cleaning and search | Trim and collapse whitespace in title/abstract; preserve agency objects in an `agencies jsonb` array. Search title and abstract with PostgreSQL English full-text search (`websearch_to_tsquery`) and a matching GIN expression index. | Token and stem matching with an index, while keeping the search surface small. |
 | JSONB agency filtering | Store agencies as a JSONB array. If agency filters become necessary, use JSONB containment (`agencies @> '[{"slug":"…"}]'::jsonb`) and measure with `EXPLAIN (ANALYZE, BUFFERS)` before adding a GIN index. | A whole-column GIN `jsonb_path_ops` index supports `@>` and fits a dynamic agency filter better than a partial index. The current EPA-only dataset is small and every row is likely to match the EPA predicate, so defer indexing. A partial index is useful only for a selective, stable subset and a query whose predicate implies the index predicate; parameterized predicates do not match at planning time. See [PostgreSQL JSONB indexing](https://www.postgresql.org/docs/current/datatype-json.html#JSON-INDEXING) and [partial indexes](https://www.postgresql.org/docs/current/indexes-partial.html). |
 | Date filter | Inclusive `filter[publication_date][gte]` and `filter[publication_date][lte]` on `publication_date`; reject invalid dates or lower bound after upper bound with 400. | JSON:API query family; no timezone conversion for date-only fields. |
 | Database access and migrations | Python uses `psycopg` 3 with parameterized SQL, no Python ORM. TypeScript uses Drizzle ORM/Kit for the typed schema, generated SQL migrations, and serving queries. | `packages/db/` owns the schema, typed PostgreSQL client factory, migration config/history, and dependencies; the web package consumes it and imports Drizzle query operators directly. Root pnpm scripts delegate to `@maiven/db` before Python ingest. The document table includes all 56 properties exposed in OpenAPI's `DocumentField` enum. SQLAlchemy Core is the Python query-builder analogue to Kysely; direct Psycopg SQL is leaner for this fixed ingest. See [Drizzle Kit generate](https://orm.drizzle.team/docs/drizzle-kit-generate), [Drizzle Kit migrate](https://orm.drizzle.team/docs/drizzle-kit-migrate), [SQLAlchemy Core](https://docs.sqlalchemy.org/en/20/core/), and [Psycopg parameters](https://www.psycopg.org/psycopg3/docs/basic/params.html). |
 | Client behavior | Start with sequential page requests, configurable timeout and retry budget, and bounded retries for timeouts, 408, 429, and 5xx. Respect `Retry-After`; fail fast on other 4xx and invalid payload envelopes. | The API publishes no quota in its schema/guide. One in-flight request is enough for this run. Log status, latency, upstream `x-request-id` when present, retries, and terminal error class. |
-| UI | Single responsive list page; search, two date inputs, result count for the current page, and Load more. Use shadcn Button/Input if setup stays quick; native date inputs are fine. | Meets the assignment without spending time on a component library showcase. |
+| UI | Single responsive read-only list page; search, date presets/custom bounds, sorting on publication date, document number, title, type, and agency, public PDF links, and Load more. Use Tailwind, shadcn components, `nuqs` for URL state, and TanStack Query `useInfiniteQuery` for pages. | URL owns shareable filters/sort; query state owns retrieved pages. Public inspection PDF URL is preferred, with the regular public PDF URL as fallback. |
 | Local database | Use the machine's local PostgreSQL for development; retain Compose as an optional reviewer shortcut. | Create `maiven-takehome` in local PostgreSQL, set Varlock's `DATABASE_URL`, and run `pnpm db:migrate`. Compose defaults to host port 5433. Keep hosting out of the critical path. See [database setup](database.md). |
 
 ### JSON:API collection shape
 
 ```text
-GET /api/documents?filter[publication_date][gte]=2026-01-01&filter[publication_date][lte]=2026-09-24&filter[q]=water&sort=-publication_date,-document_number&page[size]=20&page[cursor]=<opaque>
+GET /api/documents?filter[publication_date][gte]=2026-01-01&filter[publication_date][lte]=2026-09-24&filter[q]=water&sort=-publication_date&page[size]=20&page[cursor]=<opaque>
 Accept: application/vnd.api+json
 
 {
@@ -316,7 +316,7 @@ Respond with `Content-Type: application/vnd.api+json` and handle `Accept` negoti
 | 0. API contract | 10 min | Complete: save the OpenAPI snapshot, review endpoint/query schemas, and probe EPA Rules with a small page. Record that response bodies are undocumented, pagination uses `next_page_url`, and no quota headers were observed. | Request, response-envelope, and retry assumptions are recorded. |
 | 1. Ingest tracer bullet | 40 min | Scaffold the uv project and HTTP client. Get one representative EPA Rule through typed query → source page → raw response JSONL → normalization → Psycopg upsert. Use the existing schema/migrations in `packages/db`. | One response is archived with provenance/hash and one row is upserted in local Postgres. |
 | 2. Complete ingest path | 35 min | Add run state/checkpointing, automatic resume, next-link iteration until the configured unique target (100 by default) or source exhaustion, bounded retry classification, append-only response archives, and Loguru run events. | Restarting a failed fixture run reaches the same target without skips/duplicates; a fresh completed run preserves prior rows and appends its own archive. |
-| 3. Serve and display | 55 min | Scaffold Next.js in `apps/web`; add the JSON:API collection/resource envelope, media negotiation, inclusive date filters, case-insensitive search, stable cursor ordering, pagination links/errors, Pino events, and the list UI. | API and UI support search, filters, and Load more; request events are correlated. |
+| 3. Serve and display | 55 min | Scaffold Next.js in `apps/web`; add the JSON:API collection/resource envelope, media negotiation, inclusive date filters, full-text search, stable cursor ordering, pagination links/errors, Pino events, and the list UI. | API and UI support search, filters, and Load more; request events are correlated. |
 | 4. Required checks and handoff | 30 min | Add focused tests, write README, run the full local path twice, review logs and git diff, and note known limits. | Required tests pass; README setup works from a clean local database; no unrelated files are committed. |
 
 Total planned time: 170 minutes, leaving 10 minutes of the 3-hour ceiling for setup friction. Stages 1 and 3 start as parallel workstreams against the frozen shared contract; stage 2 completes the ingest workstream, then stage 4 integrates and verifies the whole path. If the baseline runs long, cut visual polish and hosting first; preserve ingest, idempotent writes, JSON:API collection contract, required tests, and README. If there is one stretch slice, choose reliability goals 1–3 below before optional pagination polish or deployment.
@@ -362,7 +362,7 @@ Check current limits before creating a hosted database: [Neon plans](https://neo
 
 ## More time
 
-After the reliability stretch, consider an archive schema/version marker and retention policy, PostgreSQL full-text search, document detail pages, richer agency filters, accessibility/keyboard polish, and a scheduled refresh. Hosting a seeded preview and making a walkthrough stays last; these are discussion points, not the 2–3 hour baseline.
+After the reliability stretch, add a schema-driven query descriptor for entity attributes and allowed filter operators, sort fields, pagination, and sparse field selection (`fields[documents]`). TypeScript inference alone does not validate arbitrary URL names at runtime; map validated allowlisted attributes to Drizzle columns and operators. V1 keeps a small explicit filter/sort allowlist and a fixed response projection. Restore all pages loaded before a browser refresh if that proves useful. Also consider an archive schema/version marker and retention policy, document detail pages, richer agency filters, accessibility/keyboard polish, and a scheduled refresh. Hosting a seeded preview and making a walkthrough stays last; these are discussion points, not the 2–3 hour baseline.
 
 ## Submission checklist
 
