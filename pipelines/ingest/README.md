@@ -66,6 +66,6 @@ Run the focused suite from the repository root:
 uv run --project pipelines/ingest --extra dev pytest pipelines/ingest/tests
 ```
 
-The PostgreSQL integration test runs when `INGEST_TEST_DATABASE_URL` points to a local test database with the committed migrations applied. It uses unique test document numbers and deletes only its own run and document rows.
+The PostgreSQL integration test runs when `INGEST_TEST_DATABASE_URL` points to a disposable database with the committed migrations applied. It refuses a database name without `test`; `--new-run` semantics in the test can supersede incomplete runs, so never point it at the application database. It uses unique test document numbers and deletes only its own run and document rows.
 
 Per-run response and transport-failure evidence append to the gitignored `data/raw/federalregister/run_id=<uuid>/` directory. Structured diagnostics append to `logs/ingest.jsonl`. The Python project uses Psycopg 3 parameterized SQL and does not manage migrations. Apply the checked-in Drizzle migrations first with `pnpm db:migrate`.
